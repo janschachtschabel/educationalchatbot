@@ -36,6 +36,35 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000;
 
+const OUTPUT_CONTROL_PROMPT = `
+You are an educational content validator. Your task is to evaluate if the following AI response is:
+1. Suitable for educational purposes
+2. Relevant to the chatbot's intended topic and purpose
+3. Appropriate for the target audience
+
+Rate the response on a scale of 1-5 where:
+1 = Completely unsuitable/irrelevant
+2 = Mostly unsuitable/irrelevant
+3 = Partially suitable/relevant
+4 = Mostly suitable/relevant
+5 = Perfectly suitable/relevant
+
+Context about the chatbot:
+{system_prompt}
+
+Response to evaluate:
+{response}
+
+IMPORTANT: You must respond with a valid JSON object in exactly this format:
+{
+  "score": <number 1-5>,
+  "reason": "<brief explanation>",
+  "allow": <boolean>
+}
+
+The "allow" field should be true only for scores of 3 or higher.
+Do not include any additional text or formatting. Only return the JSON object.`;
+
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
@@ -143,6 +172,50 @@ export const ai = {
     }
   },
 
+  async validateOutput(response: string, systemPrompt: string, config: AIConfig): Promise<{ 
+    isValid: boolean;
+    reason: string;
+  }> {
+    try {
+      const prompt = OUTPUT_CONTROL_PROMPT
+        .replace('{system_prompt}', systemPrompt)
+        .replace('{response}', response);
+
+      const messages: AIMessage[] = [
+        { role: 'system', content: prompt },
+        { role: 'user', content: response }
+      ];
+
+      const { response: validationResponse } = await this.chat(messages, config);
+
+      try {
+        const validation = JSON.parse(validationResponse);
+        if (typeof validation.score !== 'number' || 
+            typeof validation.reason !== 'string' || 
+            typeof validation.allow !== 'boolean') {
+          throw new Error('Invalid validation response format');
+        }
+
+        return {
+          isValid: validation.allow,
+          reason: validation.reason
+        };
+      } catch (parseError) {
+        console.error('Error parsing validation response:', parseError);
+        return {
+          isValid: true, // Fallback to allowing the response
+          reason: 'Error validating response'
+        };
+      }
+    } catch (error) {
+      console.error('Error in output validation:', error);
+      return {
+        isValid: true, // Fallback to allowing the response
+        reason: 'Error validating response'
+      };
+    }
+  },
+
   async chat(messages: AIMessage[], config: AIConfig, chatbotId?: string): Promise<{ response: string; tokens: number }> {
     try {
       if (!config || !config.apiKey) {
@@ -192,9 +265,26 @@ export const ai = {
       }
 
       const result = await response.json();
+      const aiResponse = result.choices[0].message.content;
+
+      // If output control is enabled, validate the response
+      if (chatbotId && contextMessages[0]?.role === 'system') {
+        const validation = await this.validateOutput(
+          aiResponse,
+          contextMessages[0].content,
+          config
+        );
+
+        if (!validation.isValid) {
+          return {
+            response: 'Entschuldigung, aber diese Frage passt nicht zum Thema oder Zweck dieses Chatbots. Bitte stellen Sie eine Frage, die sich auf das eigentliche Thema bezieht.',
+            tokens: result.usage.total_tokens
+          };
+        }
+      }
       
       return {
-        response: result.choices[0].message.content,
+        response: aiResponse,
         tokens: result.usage.total_tokens
       };
     } catch (error) {

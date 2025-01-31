@@ -16,7 +16,8 @@ const translations = {
       select: 'Auswählen',
       search: 'Suchen',
       noResults: 'Keine Ergebnisse gefunden',
-      backToGallery: 'Zurück zur Galerie'
+      backToGallery: 'Zurück zur Galerie',
+      finish: 'Fertig'
     },
     nav: {
       home: 'Startseite',
@@ -102,6 +103,10 @@ const translations = {
       wloSearchDesc: 'Ermöglicht die Suche nach Bildungsinhalten von WirLernenOnline während des Chats',
       wloResources: 'WLO-Materialien',
       wloResourcesDesc: 'Integriert ausgewählte WirLernenOnline Materialien in den Chatbot',
+      learningProgress: 'Lernfortschritt',
+      learningProgressDesc: 'Verfolgt und analysiert den Lernfortschritt während der Konversation',
+      outputControl: 'Ausgabekontrolle',
+      outputControlDesc: 'Prüft die KI-Antworten auf Eignung für Bildungszwecke und Themenbezug',
       enableTools: 'Tools aktivieren',
     },
     welcome: {
@@ -174,7 +179,8 @@ const translations = {
       select: 'Select',
       search: 'Search',
       noResults: 'No results found',
-      backToGallery: 'Back to Gallery'
+      backToGallery: 'Back to Gallery',
+      finish: 'Finish'
     },
     nav: {
       home: 'Home',
@@ -260,6 +266,10 @@ const translations = {
       wloSearchDesc: 'Enables searching WirLernenOnline educational content during chat',
       wloResources: 'WLO Materials',
       wloResourcesDesc: 'Integrates selected WirLernenOnline materials into the chatbot',
+      learningProgress: 'Learning Progress',
+      learningProgressDesc: 'Tracks and analyzes learning progress during conversation',
+      outputControl: 'Output Control',
+      outputControlDesc: 'Checks AI responses for educational suitability and topic relevance',
       enableTools: 'Enable Tools',
     },
     welcome: {

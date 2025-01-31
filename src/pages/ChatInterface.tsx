@@ -129,8 +129,10 @@ export default function ChatInterface() {
   useEffect(() => {
     if (id) {
       loadChatbot();
-      // Initialize learning progress for this session
-      learningProgress.initSession(id, sessionId);
+      // Initialize learning progress for this session if enabled
+      if (chatbot?.enabled_tools?.includes('learning_progress')) {
+        learningProgress.initSession(id, sessionId);
+      }
     }
   }, [id]);
 
@@ -243,6 +245,8 @@ export default function ChatInterface() {
   };
 
   const evaluateLearningProgress = async (messages: Message[], config: AIConfig) => {
+    if (!chatbot?.enabled_tools?.includes('learning_progress')) return;
+    
     try {
       const evalMessages: AIMessage[] = [
         { role: 'system', content: LEARNING_EVAL_PROMPT },
@@ -486,14 +490,21 @@ export default function ChatInterface() {
     <div className="max-w-7xl mx-auto px-4">
       <div className="flex gap-4">
         {/* Left Sidebar - Learning Progress */}
-        <div className="w-64 shrink-0">
-          <div className="sticky top-4">
-            <LearningProgressTracker chatbotId={sessionId} />
+        {chatbot.enabled_tools?.includes('learning_progress') && (
+          <div className="w-64 shrink-0">
+            <div className="sticky top-4">
+              <LearningProgressTracker chatbotId={sessionId} />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Main Chat Area */}
-        <div className="flex-1">
+        <div className={`flex-1 ${
+          !chatbot.enabled_tools?.includes('learning_progress') && 
+          !chatbot.enabled_tools?.includes('wlo_resources') 
+            ? 'max-w-4xl mx-auto' 
+            : ''
+        }`}>
           <div className="bg-white rounded-lg shadow-md overflow-hidden">
             {/* Header */}
             <div className="border-b border-gray-200 p-4">

@@ -15,8 +15,6 @@ interface AuthState {
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
@@ -27,36 +25,45 @@ export const useAuthStore = create<AuthState>()(
       checkAuth: async () => {
         set({ loading: true, error: null });
         
+        let lastError;
         for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
           try {
             const user = await auth.getCurrentUser();
             set({ user, loading: false, initialized: true, error: null });
             return;
           } catch (error) {
+            lastError = error;
             console.error(`Auth check attempt ${attempt + 1} failed:`, error);
             
-            if (attempt === MAX_RETRIES - 1) {
-              set({ 
-                user: null, 
-                loading: false, 
-                initialized: true,
-                error: 'Unable to connect to authentication service. Please try again later.'
-              });
-              return;
+            if (attempt < MAX_RETRIES - 1 && auth.isRetryableError(error)) {
+              await new Promise(resolve => 
+                setTimeout(resolve, RETRY_DELAY * Math.pow(2, attempt))
+              );
+              continue;
             }
             
-            await sleep(RETRY_DELAY * Math.pow(2, attempt));
+            set({ 
+              user: null, 
+              loading: false, 
+              initialized: true,
+              error: auth.isSessionError(error)
+                ? 'Session expired. Please sign in again.'
+                : 'Unable to connect to authentication service'
+            });
+            return;
           }
         }
+        throw lastError;
       },
       signOut: async () => {
         try {
           await auth.signOut();
           set({ user: null, error: null });
-          window.location.href = '/';
         } catch (error) {
           console.error('Sign out error:', error);
-          set({ error: 'Failed to sign out. Please try again.' });
+          // Force cleanup on error
+          window.localStorage.clear();
+          window.location.reload();
         }
       },
       clearError: () => set({ error: null })
@@ -84,7 +91,7 @@ export const useAuthStore = create<AuthState>()(
 let authSubscription: { unsubscribe: () => void } | null = null;
 
 const initAuth = async () => {
-  // Clean up existing subscription if any
+  // Clean up existing subscription
   if (authSubscription?.unsubscribe) {
     authSubscription.unsubscribe();
   }
@@ -93,8 +100,13 @@ const initAuth = async () => {
   await useAuthStore.getState().checkAuth();
   
   // Set up new subscription
-  authSubscription = await auth.onAuthStateChange(async (user) => {
-    useAuthStore.setState({ user, loading: false, initialized: true, error: null });
+  authSubscription = auth.onAuthStateChange(async (user) => {
+    useAuthStore.setState({ 
+      user, 
+      loading: false, 
+      initialized: true, 
+      error: null 
+    });
   });
 
   // Clean up on window unload

@@ -61,8 +61,7 @@ function Dashboard() {
       let query = supabase
         .from('chatbot_templates')
         .select('*')
-        .eq('creator_id', user.id)
-        .order('created_at', { ascending: false });
+        .eq('creator_id', user.id);
 
       if (view === 'public') {
         query = query.eq('is_public', true);
@@ -70,14 +69,10 @@ function Dashboard() {
         query = query.eq('is_public', false);
       }
 
-      const { data, error } = await query;
+      const { data, error } = await query.order('created_at', { ascending: false });
       
-      if (error) {
-        console.error('Error loading chatbots:', error);
-        throw error;
-      }
+      if (error) throw error;
       
-      console.log('Loaded chatbots:', data); // Add logging to debug
       setChatbots(data || []);
     } catch (error) {
       console.error('Error loading chatbots:', error);

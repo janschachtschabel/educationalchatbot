@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Book } from 'lucide-react';
+import { FileText, Book, BarChart2, Shield } from 'lucide-react';
 import { useLanguageStore } from '../lib/useTranslations';
 
 interface ToolManagerProps {
@@ -23,6 +23,14 @@ export default function ToolManager({ enabledTools, onChange }: ToolManagerProps
     {
       id: 'wlo_resources',
       icon: <Book className="h-5 w-5" />,
+    },
+    {
+      id: 'learning_progress',
+      icon: <BarChart2 className="h-5 w-5" />,
+    },
+    {
+      id: 'output_control',
+      icon: <Shield className="h-5 w-5" />,
     }
   ];
 
@@ -37,6 +45,8 @@ export default function ToolManager({ enabledTools, onChange }: ToolManagerProps
     switch (toolId) {
       case 'document_qa': return t.tools.documentQA;
       case 'wlo_resources': return t.tools.wloResources;
+      case 'learning_progress': return t.tools.learningProgress;
+      case 'output_control': return t.tools.outputControl;
       default: return toolId;
     }
   };
@@ -45,6 +55,8 @@ export default function ToolManager({ enabledTools, onChange }: ToolManagerProps
     switch (toolId) {
       case 'document_qa': return t.tools.documentQADesc;
       case 'wlo_resources': return t.tools.wloResourcesDesc;
+      case 'learning_progress': return t.tools.learningProgressDesc;
+      case 'output_control': return t.tools.outputControlDesc;
       default: return '';
     }
   };
