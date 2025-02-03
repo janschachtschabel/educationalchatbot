@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Search, Filter, Bot, BookOpen, X, Key, User } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLanguageStore } from '../lib/useTranslations';
@@ -13,6 +13,7 @@ interface Chatbot extends ChatbotTemplate {
 
 export default function Gallery() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { t } = useLanguageStore();
   const [chatbots, setChatbots] = useState<Chatbot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,11 +26,16 @@ export default function Gallery() {
     author: '',
   });
   const [showDirectAccess, setShowDirectAccess] = useState(false);
-  const [directId, setDirectId] = useState('');
+  const [directId, setDirectId] = useState(searchParams.get('chatbot') || '');
   const [directPassword, setDirectPassword] = useState('');
+  const [accessLoading, setAccessLoading] = useState(false);
 
   useEffect(() => {
     loadChatbots();
+    // Show direct access form if chatbot ID is in URL
+    if (searchParams.get('chatbot')) {
+      setShowDirectAccess(true);
+    }
   }, []);
 
   async function loadChatbots() {
@@ -67,42 +73,78 @@ export default function Gallery() {
     e.preventDefault();
     if (!directId) return;
 
+    setError('');
+    setAccessLoading(true);
+
     try {
+      // First check if chatbot exists and is active
       const { data: chatbot, error: chatbotError } = await supabase
         .from('chatbot_templates')
-        .select('id, is_active')
+        .select('id, is_active, is_public')
         .eq('id', directId)
-        .single();
+        .maybeSingle();
 
-      if (chatbotError) throw chatbotError;
+      if (chatbotError) {
+        console.error('Chatbot lookup error:', chatbotError);
+        throw new Error(t.gallery.invalidId);
+      }
+
       if (!chatbot) {
-        setError(t.gallery.invalidId);
-        return;
-      }
-      if (!chatbot.is_active) {
-        setError(t.gallery.inactiveChatbot);
-        return;
+        throw new Error(t.gallery.invalidId);
       }
 
-      if (directPassword) {
-        const { data: pwCheck, error: pwError } = await supabase
+      if (!chatbot.is_active) {
+        throw new Error(t.gallery.inactiveChatbot);
+      }
+
+      // If chatbot is not public, check password
+      if (!chatbot.is_public) {
+        // First check if password is required
+        const { data: pwRequired, error: pwCheckError } = await supabase
           .from('chatbot_passwords')
           .select('id')
           .eq('chatbot_id', directId)
-          .eq('password_hash', directPassword)
           .eq('is_active', true)
-          .single();
+          .maybeSingle();
 
-        if (pwError || !pwCheck) {
-          setError(t.gallery.invalidPassword);
-          return;
+        if (pwCheckError) {
+          console.error('Password check error:', pwCheckError);
+          throw new Error(t.common.error);
+        }
+
+        // If password is required but not provided
+        if (pwRequired && !directPassword) {
+          throw new Error(t.gallery.passwordRequired);
+        }
+
+        // If password is provided, verify it
+        if (directPassword) {
+          const { data: pwValid, error: pwValidError } = await supabase
+            .from('chatbot_passwords')
+            .select('id')
+            .eq('chatbot_id', directId)
+            .eq('password_hash', directPassword)
+            .eq('is_active', true)
+            .maybeSingle();
+
+          if (pwValidError) {
+            console.error('Password validation error:', pwValidError);
+            throw new Error(t.common.error);
+          }
+
+          if (!pwValid) {
+            throw new Error(t.gallery.invalidPassword);
+          }
         }
       }
 
+      // All checks passed, navigate to chat
       navigate(`/chat/${directId}`);
     } catch (err) {
       console.error('Error accessing chatbot:', err);
-      setError(t.common.error);
+      setError(err instanceof Error ? err.message : t.common.error);
+    } finally {
+      setAccessLoading(false);
     }
   };
 
@@ -255,15 +297,16 @@ export default function Gallery() {
               <div className="flex items-end">
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                  disabled={accessLoading || !directId}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 min-w-[100px]"
                 >
-                  {t.gallery.access}
+                  {accessLoading ? t.common.loading : t.gallery.access}
                 </button>
               </div>
             </div>
 
             {error && (
-              <div className="text-red-600 text-sm">
+              <div className="text-red-600 text-sm bg-red-50 p-3 rounded-md">
                 {error}
               </div>
             )}

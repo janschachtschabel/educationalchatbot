@@ -35,6 +35,16 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000;
+const MAX_TIMEOUT = 10000; // 10 seconds timeout
+
+// Default config as fallback
+const DEFAULT_CONFIG: AIConfig = {
+  provider: 'openai',
+  model: 'gpt-4o-mini',
+  apiKey: 'sk-demo-key',
+  baseUrl: 'https://api.openai.com/v1',
+  superprompt: 'Du bist ein KI-Assistent für Lehr- und Lernsituationen und gibst sachlich korrekte, verständliche und fachlich fundierte Antworten.'
+};
 
 const OUTPUT_CONTROL_PROMPT = `
 You are an educational content validator. Your task is to evaluate if the following AI response is:
@@ -71,7 +81,13 @@ async function fetchWithRetry(
   retryCount = 0
 ): Promise<Response> {
   try {
-    const response = await fetch(url, options);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), MAX_TIMEOUT);
+
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    }).finally(() => clearTimeout(timeoutId));
     
     // Handle rate limiting
     if (response.status === 429 && retryCount < MAX_RETRIES) {
@@ -81,12 +97,15 @@ async function fetchWithRetry(
     }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API error (${response.status}): ${errorText}`);
+      throw new Error(`API-Fehler: ${response.status}`);
     }
 
     return response;
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Die Anfrage hat zu lange gedauert. Bitte versuchen Sie es später erneut.');
+    }
+
     if (retryCount < MAX_RETRIES) {
       const delay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
       await sleep(delay);
@@ -97,33 +116,36 @@ async function fetchWithRetry(
 }
 
 export const ai = {
-  async getChatbotConfig(userId: string): Promise<AIConfig | null> {
+  async getChatbotConfig(): Promise<AIConfig> {
     try {
+      // Try to get admin settings
       const { data: adminSettings, error: adminError } = await supabase
         .from('admin_settings')
         .select('provider, model, api_key, base_url, superprompt')
-        .limit(1)
         .maybeSingle();
 
-      if (adminError && adminError.code !== 'PGRST116') {
+      // Handle errors
+      if (adminError) {
         console.error('Error fetching admin settings:', adminError);
-        return null;
+        return DEFAULT_CONFIG;
       }
 
-      if (adminSettings) {
-        return {
-          provider: adminSettings.provider,
-          model: adminSettings.model,
-          apiKey: adminSettings.api_key,
-          baseUrl: adminSettings.base_url,
-          superprompt: adminSettings.superprompt
-        };
+      // If no settings exist, return default config
+      if (!adminSettings) {
+        return DEFAULT_CONFIG;
       }
 
-      return null;
+      // Return admin settings
+      return {
+        provider: adminSettings.provider || DEFAULT_CONFIG.provider,
+        model: adminSettings.model || DEFAULT_CONFIG.model,
+        apiKey: adminSettings.api_key || DEFAULT_CONFIG.apiKey,
+        baseUrl: adminSettings.base_url || DEFAULT_CONFIG.baseUrl,
+        superprompt: adminSettings.superprompt || DEFAULT_CONFIG.superprompt
+      };
     } catch (error) {
       console.error('Error in getChatbotConfig:', error);
-      return null;
+      return DEFAULT_CONFIG;
     }
   },
 
@@ -148,7 +170,7 @@ export const ai = {
       return result.data[0].embedding;
     } catch (error) {
       console.error('Error getting embeddings:', error);
-      throw error;
+      throw new Error('Fehler beim Verarbeiten des Dokuments. Bitte versuchen Sie es später erneut.');
     }
   },
 
@@ -168,7 +190,7 @@ export const ai = {
       return documents.map(doc => doc.content);
     } catch (error) {
       console.error('Error searching documents:', error);
-      return [];
+      return []; // Return empty array instead of failing
     }
   },
 
@@ -217,27 +239,32 @@ export const ai = {
   },
 
   async chat(messages: AIMessage[], config: AIConfig, chatbotId?: string): Promise<{ response: string; tokens: number }> {
-    try {
-      if (!config || !config.apiKey) {
-        throw new Error('Invalid AI configuration');
-      }
+    if (!config || !config.apiKey) {
+      throw new Error('Der Chatbot ist derzeit nicht verfügbar. Bitte versuchen Sie es später erneut.');
+    }
 
+    try {
       let contextMessages = [...messages];
       const lastMessage = messages[messages.length - 1];
 
       // Add document context if available
       if (chatbotId && lastMessage.role === 'user') {
-        const relevantDocs = await this.searchSimilarDocuments(
-          chatbotId,
-          lastMessage.content,
-          config
-        );
+        try {
+          const relevantDocs = await this.searchSimilarDocuments(
+            chatbotId,
+            lastMessage.content,
+            config
+          );
 
-        if (relevantDocs.length > 0) {
-          contextMessages.splice(messages.length - 1, 0, {
-            role: 'system',
-            content: `Here is relevant context from the knowledge base:\n\n${relevantDocs.join('\n\n')}`
-          });
+          if (relevantDocs.length > 0) {
+            contextMessages.splice(messages.length - 1, 0, {
+              role: 'system',
+              content: `Here is relevant context from the knowledge base:\n\n${relevantDocs.join('\n\n')}`
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching document context:', error);
+          // Continue without document context rather than failing
         }
       }
 
@@ -246,7 +273,7 @@ export const ai = {
         contextMessages[0].content = `${config.superprompt}\n\n${contextMessages[0].content}`;
       }
 
-      const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      const response = await fetchWithRetry(`${config.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${config.apiKey}`,
@@ -260,26 +287,32 @@ export const ai = {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`API error: ${response.statusText}`);
+      const result = await response.json();
+      
+      if (!result.choices?.[0]?.message?.content) {
+        throw new Error('Der Chatbot konnte keine gültige Antwort generieren. Bitte versuchen Sie es erneut.');
       }
 
-      const result = await response.json();
       const aiResponse = result.choices[0].message.content;
 
       // If output control is enabled, validate the response
       if (chatbotId && contextMessages[0]?.role === 'system') {
-        const validation = await this.validateOutput(
-          aiResponse,
-          contextMessages[0].content,
-          config
-        );
+        try {
+          const validation = await this.validateOutput(
+            aiResponse,
+            contextMessages[0].content,
+            config
+          );
 
-        if (!validation.isValid) {
-          return {
-            response: 'Entschuldigung, aber diese Frage passt nicht zum Thema oder Zweck dieses Chatbots. Bitte stellen Sie eine Frage, die sich auf das eigentliche Thema bezieht.',
-            tokens: result.usage.total_tokens
-          };
+          if (!validation.isValid) {
+            return {
+              response: 'Entschuldigung, aber diese Frage passt nicht zum Thema oder Zweck dieses Chatbots. Bitte stellen Sie eine Frage, die sich auf das eigentliche Thema bezieht.',
+              tokens: result.usage.total_tokens
+            };
+          }
+        } catch (error) {
+          console.error('Error validating output:', error);
+          // Continue with original response if validation fails
         }
       }
       
@@ -289,7 +322,13 @@ export const ai = {
       };
     } catch (error) {
       console.error('Error in AI chat:', error);
-      throw error;
+      
+      // Re-throw user-friendly errors
+      if (error instanceof Error) {
+        throw error;
+      }
+      
+      throw new Error('Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.');
     }
   },
 

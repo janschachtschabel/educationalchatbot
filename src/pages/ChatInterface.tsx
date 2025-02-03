@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, Bot, User, ArrowLeft, MessageSquare } from 'lucide-react';
+import { Send, Paperclip, Bot, User, ArrowLeft, MessageSquare, AlertCircle } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { supabase } from '../lib/supabase';
@@ -7,90 +7,8 @@ import { ai, AIMessage } from '../lib/ai';
 import { useAuthStore } from '../store/authStore';
 import { useLanguageStore } from '../lib/useTranslations';
 import WLOResourceList from '../components/WLOResourceList';
-import { tools } from '../lib/tools';
 import LearningProgressTracker from '../components/LearningProgressTracker';
-import { learningProgress } from '../lib/learningProgress';
-
-interface EvaluationResponse {
-  understanding: {
-    score: number;
-    reason: string;
-  };
-  application: {
-    score: number;
-    reason: string;
-  };
-  transfer: {
-    score: number;
-    reason: string;
-  };
-}
-
-const LEARNING_EVAL_PROMPT = `
-You are a learning progress evaluator. Analyze the conversation and evaluate the user's learning progress.
-Focus on these three key areas:
-
-1. Basic Understanding (Scale 0-5)
-Consider:
-- Comprehension of core concepts
-- Ability to explain ideas in their own words
-- Quality of questions asked
-- Engagement with the material
-
-2. Practical Application (Scale 0-5)
-Consider:
-- Attempts to apply concepts
-- Problem-solving abilities
-- Quality of exercises completed
-- Improvement over time
-
-3. Advanced Understanding & Transfer (Scale 0-5)
-Consider:
-- Connections made to other topics
-- Critical thinking and analysis
-- Understanding of relationships
-- Ability to extend concepts
-
-IMPORTANT: You must respond with a valid JSON object in exactly this format:
-{
-  "understanding": {
-    "score": <number 0-5>,
-    "reason": "<brief explanation>"
-  },
-  "application": {
-    "score": <number 0-5>,
-    "reason": "<brief explanation>"
-  },
-  "transfer": {
-    "score": <number 0-5>,
-    "reason": "<brief explanation>"
-  }
-}
-
-Do not include any additional text or formatting. Only return the JSON object.`;
-
-const validateEvaluation = (evaluation: any): evaluation is EvaluationResponse => {
-  if (!evaluation || typeof evaluation !== 'object') return false;
-
-  const validateScore = (score: any): boolean => {
-    return typeof score === 'number' && score >= 0 && score <= 5;
-  };
-
-  const validateSection = (section: any): boolean => {
-    return (
-      section &&
-      typeof section === 'object' &&
-      validateScore(section.score) &&
-      typeof section.reason === 'string'
-    );
-  };
-
-  return (
-    validateSection(evaluation.understanding) &&
-    validateSection(evaluation.application) &&
-    validateSection(evaluation.transfer)
-  );
-};
+import { learningProgress, DEFAULT_OBJECTIVES } from '../lib/learningProgress';
 
 interface Message {
   id: string;
@@ -114,7 +32,7 @@ export default function ChatInterface() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const { t, language } = useLanguageStore();
+  const { t } = useLanguageStore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [message, setMessage] = useState('');
   const [chatbot, setChatbot] = useState<ChatbotTemplate | null>(null);
@@ -129,7 +47,6 @@ export default function ChatInterface() {
   useEffect(() => {
     if (id) {
       loadChatbot();
-      // Initialize learning progress for this session if enabled
       if (chatbot?.enabled_tools?.includes('learning_progress')) {
         learningProgress.initSession(id, sessionId);
       }
@@ -152,53 +69,66 @@ export default function ChatInterface() {
     }
   }, [chatbot, wloResources]);
 
-  const updateSystemPrompt = () => {
-    let prompt = chatbot.system_prompt;
-
-    // Add WLO materials information if enabled and available
-    if (chatbot.enabled_tools?.includes('wlo_resources') && wloResources.length > 0) {
-      prompt = `${prompt}\n\nDu hast Zugriff auf folgende Lehr- und Lernmaterialien von WirLernenOnline, die du aktiv in den Lehr- und Lernprozess einbinden sollst:\n\n`;
-      
-      wloResources.forEach(resource => {
-        const title = resource.properties?.['cclom:title']?.[0] || resource.name;
-        const description = resource.properties?.['cclom:general_description']?.[0];
-        const type = resource.properties?.['ccm:oeh_lrt_aggregated_DISPLAYNAME']?.[0];
-        const subject = resource.properties?.['ccm:taxonid_DISPLAYNAME']?.[0];
-        
-        prompt += `- ${title}\n`;
-        if (description) prompt += `  Beschreibung: ${description}\n`;
-        if (type) prompt += `  Typ: ${type}\n`;
-        if (subject) prompt += `  Fach: ${subject}\n`;
-        prompt += '\n';
-      });
-
-      prompt += '\nBitte empfehle diese Materialien in passenden Situationen und beziehe sie aktiv in deine Antworten ein.';
-    }
-
-    setSystemPrompt(prompt);
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   async function loadChatbot() {
     try {
-      const { data, error } = await supabase
+      // First try to get the chatbot directly
+      const { data: chatbot, error: chatbotError } = await supabase
         .from('chatbot_templates')
         .select('*')
         .eq('id', id)
+        .eq('is_active', true)
         .single();
 
-      if (error) throw error;
-      setChatbot(data);
+      if (chatbotError) {
+        if (chatbotError.code === 'PGRST116') {
+          throw new Error('Dieser Chatbot wurde nicht gefunden.');
+        }
+        throw chatbotError;
+      }
 
-      // Only add initial greeting
+      if (!chatbot) {
+        throw new Error('Dieser Chatbot ist nicht verfügbar.');
+      }
+
+      // Check if chatbot is public or user is creator
+      if (!chatbot.is_public && user?.id !== chatbot.creator_id) {
+        // Check for password protection
+        const { data: passwordData, error: passwordError } = await supabase
+          .from('chatbot_passwords')
+          .select('id')
+          .eq('chatbot_id', id)
+          .eq('is_active', true)
+          .maybeSingle();
+
+        if (passwordError) throw passwordError;
+
+        // If chatbot has password protection and no password was provided
+        if (passwordData) {
+          // Redirect to gallery with chatbot ID pre-filled
+          navigate(`/gallery?chatbot=${id}`);
+          return;
+        }
+      }
+
+      setChatbot(chatbot);
+
+      // Add initial greeting
       setMessages([{
         id: '0',
         role: 'assistant',
-        content: `${t.chat.greeting} ${data.name}. ${data.description}`,
+        content: `${t.chat.greeting} ${chatbot.name}. ${chatbot.description}`,
         timestamp: Date.now(),
       }]);
     } catch (error) {
       console.error('Error loading chatbot:', error);
-      setError('Failed to load chatbot');
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Der Chatbot konnte nicht geladen werden.';
+      setError(errorMessage);
     }
   }
 
@@ -212,44 +142,66 @@ export default function ChatInterface() {
         .eq('chatbot_id', id);
 
       if (error) throw error;
-
-      // Transform database resources back to WLO format for the search component
-      const transformedResources = data?.map(resource => ({
-        id: resource.id,
-        name: resource.title,
-        properties: resource.properties || {
-          'cclom:title': [resource.title],
-          'cclom:general_description': [resource.description],
-          'ccm:wwwurl': [resource.url],
-          'ccm:taxonid_DISPLAYNAME': [resource.subject],
-          'ccm:educationalcontext_DISPLAYNAME': resource.education_level,
-          'ccm:oeh_lrt_aggregated_DISPLAYNAME': [resource.resource_type]
-        },
-        preview: resource.preview_url ? { url: resource.preview_url } : undefined
-      })) || [];
-
-      setWloResources(transformedResources);
+      setWloResources(data || []);
     } catch (err) {
       console.error('Error loading WLO resources:', err);
+      // Non-critical - continue without WLO resources
     }
   }
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const updateSystemPrompt = () => {
+    if (!chatbot) return;
+    
+    let prompt = chatbot.system_prompt;
+
+    // Add WLO materials information if enabled and available
+    if (chatbot.enabled_tools?.includes('wlo_resources') && wloResources.length > 0) {
+      prompt = `${prompt}\n\nDu hast Zugriff auf folgende Lehr- und Lernmaterialien von WirLernenOnline, die du aktiv in den Lehr- und Lernprozess einbinden sollst:\n\n`;
+      
+      wloResources.forEach(resource => {
+        const title = resource.title || resource.name;
+        prompt += `- ${title}\n`;
+        if (resource.description) prompt += `  Beschreibung: ${resource.description}\n`;
+        if (resource.resource_type) prompt += `  Typ: ${resource.resource_type}\n`;
+        if (resource.subject) prompt += `  Fach: ${resource.subject}\n`;
+        prompt += '\n';
+      });
+
+      prompt += '\nBitte empfehle diese Materialien in passenden Situationen und beziehe sie aktiv in deine Antworten ein.';
+    }
+
+    setSystemPrompt(prompt);
   };
 
-  const handleStarterClick = async (starter: string) => {
-    if (!chatbot || !id) return;
-    await handleUserMessage(starter);
-    setShowStarters(false);
-  };
-
-  const evaluateLearningProgress = async (messages: Message[], config: AIConfig) => {
+  const evaluateLearningProgress = async (messages: Message[], config: any) => {
     if (!chatbot?.enabled_tools?.includes('learning_progress')) return;
     
     try {
+      // Create a more structured prompt for better evaluation
       const evalMessages: AIMessage[] = [
-        { role: 'system', content: LEARNING_EVAL_PROMPT },
+        { 
+          role: 'system', 
+          content: `You are a learning progress evaluator. Analyze the conversation and evaluate the progress for each learning objective:
+
+1. Grundlegendes Verständnis (ID: 1)
+2. Anwendung des Wissens (ID: 2)
+3. Vertiefung & Transfer (ID: 3)
+
+For each objective, provide a confidence score between 0-5 where:
+0 = No evidence
+1-2 = Basic understanding
+3-4 = Good progress
+5 = Mastery
+
+IMPORTANT: You must respond with a valid JSON object in exactly this format:
+{
+  "1": <score>,
+  "2": <score>,
+  "3": <score>
+}
+
+Do not include any additional text or explanation.` 
+        },
         { 
           role: 'user', 
           content: JSON.stringify({
@@ -257,73 +209,48 @@ export default function ChatInterface() {
               role: msg.role,
               content: msg.content
             }))
-          }, null, 2)
+          })
         }
       ];
 
-      const { response: evalResponse } = await ai.chat(evalMessages, config);
+      const { response } = await ai.chat(evalMessages, config);
       
       try {
-        // Try to parse the response as JSON
-        let evaluation: unknown;
+        // Validate response format
+        const evaluation = JSON.parse(response);
         
-        // Clean the response string - remove any markdown formatting or extra text
-        const cleanedResponse = evalResponse
-          .replace(/```json\s*|\s*```/g, '') // Remove markdown code blocks
-          .trim();
-        
-        try {
-          evaluation = JSON.parse(cleanedResponse);
-        } catch (parseError) {
-          console.error('Failed to parse evaluation response:', parseError);
-          console.log('Raw response:', evalResponse);
-          console.log('Cleaned response:', cleanedResponse);
-          return;
+        // Ensure the evaluation has the correct structure
+        if (typeof evaluation !== 'object' || evaluation === null) {
+          throw new Error('Invalid evaluation format');
         }
 
-        // Validate the evaluation structure
-        if (!validateEvaluation(evaluation)) {
-          console.error('Invalid evaluation structure:', evaluation);
-          return;
-        }
-
-        // Update learning progress with validation
-        const updates = [
-          {
-            id: '1',
-            score: evaluation.understanding.score,
-            status: evaluation.understanding.score >= 4 ? 'completed' : 'in_progress'
-          },
-          {
-            id: '2',
-            score: evaluation.application.score,
-            status: evaluation.application.score >= 4 ? 'completed' : 'in_progress'
-          },
-          {
-            id: '3',
-            score: evaluation.transfer.score,
-            status: evaluation.transfer.score >= 4 ? 'completed' : 'in_progress'
+        // Validate and process each objective
+        Object.entries(evaluation).forEach(([objectiveId, score]) => {
+          // Ensure score is a number between 0 and 5
+          const numScore = Number(score);
+          if (isNaN(numScore) || numScore < 0 || numScore > 5) {
+            throw new Error(`Invalid score for objective ${objectiveId}`);
           }
-        ];
 
-        // Apply updates with error handling
-        updates.forEach(update => {
-          const success = learningProgress.updateObjective(sessionId, update.id, {
-            confidence: update.score,
-            status: update.status
+          // Update learning progress with validated score
+          learningProgress.updateObjective(sessionId, objectiveId, {
+            confidence: numScore,
+            status: numScore >= 4 ? 'completed' : numScore > 0 ? 'in_progress' : 'not_started'
           });
-
-          if (!success) {
-            console.warn(`Failed to update objective ${update.id}`);
-          }
         });
-
       } catch (parseError) {
-        console.error('Error parsing evaluation response:', parseError);
-        console.log('Raw response:', evalResponse);
+        console.error('Error parsing evaluation:', parseError);
+        // Set default progress values instead of failing
+        DEFAULT_OBJECTIVES.forEach(obj => {
+          learningProgress.updateObjective(sessionId, obj.id, {
+            confidence: 0,
+            status: 'not_started'
+          });
+        });
       }
     } catch (error) {
       console.error('Error evaluating learning progress:', error);
+      // Don't throw - this is a non-critical feature
     }
   };
 
@@ -343,15 +270,12 @@ export default function ChatInterface() {
     setError(null);
 
     try {
-      // Get AI config from creator's settings
-      const config = await ai.getChatbotConfig(chatbot.creator_id);
-      if (!config) {
-        throw new Error('AI configuration not found');
-      }
+      // Get central admin AI config - no user ID needed
+      const config = await ai.getChatbotConfig();
 
-      // First, get the regular chat response
+      // Prepare messages array
       const aiMessages: AIMessage[] = [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: systemPrompt || chatbot.system_prompt },
         ...messages.map(msg => ({
           role: msg.role === 'user' ? 'user' : 'assistant',
           content: msg.content,
@@ -359,7 +283,7 @@ export default function ChatInterface() {
         { role: 'user', content },
       ];
 
-      // Get AI response with document context
+      // Get AI response
       const { response, tokens } = await ai.chat(aiMessages, config, id);
 
       const assistantMessage: Message = {
@@ -372,115 +296,93 @@ export default function ChatInterface() {
 
       setMessages(prev => [...prev, assistantMessage]);
 
-      // Evaluate learning progress with all messages including the new ones
-      await evaluateLearningProgress(
-        messages.concat(userMessage, assistantMessage),
-        config
-      );
-
-      // Save chat history
-      if (user) {
-        const { error: historyError } = await supabase
-          .from('chat_sessions')
+      // Track token usage without user data
+      try {
+        await supabase
+          .from('usage_logs')
           .insert({
-            chatbot_id: chatbot.id,
-            session_id: id,
-            user_id: user.id,
-            messages: messages.concat(userMessage, assistantMessage),
+            chatbot_id: id,
             tokens_used: tokens,
           });
+      } catch (usageError) {
+        console.error('Error logging usage:', usageError);
+        // Non-critical - continue even if logging fails
+      }
 
-        if (historyError) {
-          console.error('Error saving chat history:', historyError);
-        }
+      // Evaluate learning progress for all users
+      if (chatbot.enabled_tools?.includes('learning_progress')) {
+        await evaluateLearningProgress(
+          messages.concat(userMessage, assistantMessage),
+          config
+        );
+      }
+
+      // Save chat history for logged-in users only
+      if (user) {
+        await saveChatHistory(userMessage, assistantMessage, tokens);
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      setError('Failed to process message');
+      
+      // Create user-friendly error message
+      const errorContent = error instanceof Error 
+        ? error.message
+        : 'Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.';
+
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `⚠️ ${errorContent}`,
+        timestamp: Date.now(),
+      };
+      
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!message.trim() || !chatbot || !id) return;
+  const saveChatHistory = async (userMessage: Message, assistantMessage: Message, tokens: number) => {
+    if (!user || !id) return; // Only save history for logged-in users
+    
+    try {
+      const { error: historyError } = await supabase
+        .from('chat_sessions')
+        .insert({
+          chatbot_id: id,
+          session_id: sessionId,
+          user_id: user.id,
+          messages: messages.concat(userMessage, assistantMessage),
+          tokens_used: tokens,
+        });
 
-    // Check if WLO search command is used
-    if (message.startsWith('/wlo ')) {
-      if (!chatbot.enabled_tools?.includes('wlo_search')) {
-        const errorMessage = language === 'de'
-          ? 'Der WLO-Suchbefehl ist für diesen Chatbot nicht aktiviert.'
-          : 'The WLO search command is not enabled for this chatbot.';
-          
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: errorMessage,
-          timestamp: Date.now(),
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-        setMessage('');
-        return;
-      }
-
-      const query = message.slice(5).trim();
-      try {
-        const results = await tools.wloSearch(query, language);
-        setWloResources(results);
-        
-        const response = language === 'de'
-          ? `Ich habe nach "${query}" in WirLernenOnline gesucht und ${results.length} passende Materialien gefunden. Du findest sie in der rechten Seitenleiste.`
-          : `I searched for "${query}" in WirLernenOnline and found ${results.length} matching materials. You can find them in the right sidebar.`;
-
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: response,
-          timestamp: Date.now(),
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-      } catch (err) {
-        console.error('WLO search error:', err);
-        const errorMessage = language === 'de'
-          ? 'Entschuldigung, bei der WLO-Suche ist ein Fehler aufgetreten. Bitte versuche es später erneut.'
-          : 'Sorry, there was an error performing the WLO search. Please try again later.';
-          
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: errorMessage,
-          timestamp: Date.now(),
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-      }
-      setMessage('');
-      return;
+      if (historyError) throw historyError;
+    } catch (error) {
+      console.error('Error saving chat history:', error);
+      // Don't throw - this is a non-critical operation
     }
+  };
 
-    await handleUserMessage(message);
+  const handleStarterClick = async (starter: string) => {
+    if (!chatbot || !id) return;
+    await handleUserMessage(starter);
+    setShowStarters(false);
   };
 
   if (error) {
     return (
-      <div className="max-w-6xl mx-auto p-4">
-        <div className="bg-red-50 text-red-600 p-4 rounded-lg">
-          {error}
-        </div>
-      </div>
-    );
-  }
-
-  if (!chatbot) {
-    return (
-      <div className="max-w-6xl mx-auto p-4">
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/3 mb-4"></div>
-          <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
-          <div className="h-4 bg-gray-200 rounded w-2/3"></div>
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-lg font-medium text-red-700 mb-2">
+            {error}
+          </h2>
+          <button
+            onClick={() => navigate('/gallery')}
+            className="mt-4 text-sm text-indigo-600 hover:text-indigo-800"
+          >
+            {t.common.backToGallery}
+          </button>
         </div>
       </div>
     );
@@ -489,8 +391,8 @@ export default function ChatInterface() {
   return (
     <div className="max-w-7xl mx-auto px-4">
       <div className="flex gap-4">
-        {/* Left Sidebar - Learning Progress */}
-        {chatbot.enabled_tools?.includes('learning_progress') && (
+        {/* Left Sidebar - Learning Progress (now for all users) */}
+        {chatbot?.enabled_tools?.includes('learning_progress') && (
           <div className="w-64 shrink-0">
             <div className="sticky top-4">
               <LearningProgressTracker chatbotId={sessionId} />
@@ -500,8 +402,8 @@ export default function ChatInterface() {
 
         {/* Main Chat Area */}
         <div className={`flex-1 ${
-          !chatbot.enabled_tools?.includes('learning_progress') && 
-          !chatbot.enabled_tools?.includes('wlo_resources') 
+          !chatbot?.enabled_tools?.includes('learning_progress') && 
+          !chatbot?.enabled_tools?.includes('wlo_resources') 
             ? 'max-w-4xl mx-auto' 
             : ''
         }`}>
@@ -549,11 +451,6 @@ export default function ChatInterface() {
                       ) : (
                         <p className="whitespace-pre-wrap">{msg.content}</p>
                       )}
-                      {msg.tokens && (
-                        <div className="mt-1 text-xs text-gray-500">
-                          Tokens: {msg.tokens}
-                        </div>
-                      )}
                     </div>
                     {msg.role === 'user' && (
                       <div className="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center">
@@ -565,7 +462,7 @@ export default function ChatInterface() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Conversation Starters - Fixed position at the bottom */}
+              {/* Conversation Starters */}
               {showStarters && chatbot?.conversation_starters?.length > 0 && (
                 <div className="border-t border-gray-200 p-4 bg-gray-50">
                   <h4 className="text-sm font-medium text-gray-700 mb-2">
@@ -575,10 +472,7 @@ export default function ChatInterface() {
                     {chatbot.conversation_starters.map((starter, index) => (
                       <button
                         key={index}
-                        onClick={() => {
-                          handleStarterClick(starter);
-                          setShowStarters(false);
-                        }}
+                        onClick={() => handleStarterClick(starter)}
                         disabled={loading}
                         className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
                       >
@@ -591,7 +485,10 @@ export default function ChatInterface() {
               )}
 
               {/* Input Form */}
-              <form onSubmit={handleSubmit} className="border-t border-gray-200 p-4">
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                if (message.trim()) handleUserMessage(message);
+              }} className="border-t border-gray-200 p-4">
                 <div className="flex gap-4">
                   <button
                     type="button"

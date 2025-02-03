@@ -25,15 +25,34 @@ export const DEFAULT_OBJECTIVES: LearningObjective[] = [
 class LearningProgressManager {
   private sessionProgress: Map<string, LearningProgress> = new Map();
   private initialized: Map<string, boolean> = new Map();
+  private storage: Storage | null = typeof window !== 'undefined' ? window.sessionStorage : null;
 
   // Initialize progress for a new chat session
   initSession(chatbotId: string, sessionId: string): LearningProgress {
     try {
-      // Check if already initialized
+      // Check if already initialized in memory
       if (this.initialized.get(sessionId)) {
-        return this.sessionProgress.get(sessionId)!;
+        const memoryProgress = this.sessionProgress.get(sessionId);
+        if (memoryProgress) {
+          return memoryProgress;
+        }
       }
 
+      // Try to restore from session storage
+      const storedProgress = this.storage?.getItem(`progress_${sessionId}`);
+      if (storedProgress) {
+        try {
+          const parsed = JSON.parse(storedProgress);
+          this.sessionProgress.set(sessionId, parsed);
+          this.initialized.set(sessionId, true);
+          return parsed;
+        } catch (e) {
+          console.warn('Failed to parse stored progress:', e);
+          // Continue with new progress if parse fails
+        }
+      }
+
+      // Create new progress if none exists
       const progress: LearningProgress = {
         chatbotId,
         sessionId,
@@ -43,6 +62,7 @@ class LearningProgressManager {
 
       this.sessionProgress.set(sessionId, progress);
       this.initialized.set(sessionId, true);
+      this.saveToStorage(sessionId, progress);
 
       return progress;
     } catch (error) {
@@ -54,11 +74,28 @@ class LearningProgressManager {
   // Get progress for a session with initialization check
   getProgress(sessionId: string): LearningProgress | null {
     try {
-      if (!this.initialized.get(sessionId)) {
-        console.warn(`Session ${sessionId} not initialized`);
-        return null;
+      // First check memory
+      if (this.initialized.get(sessionId)) {
+        const memoryProgress = this.sessionProgress.get(sessionId);
+        if (memoryProgress) {
+          return memoryProgress;
+        }
       }
-      return this.sessionProgress.get(sessionId) || null;
+
+      // Try to restore from storage if not in memory
+      const storedProgress = this.storage?.getItem(`progress_${sessionId}`);
+      if (storedProgress) {
+        try {
+          const parsed = JSON.parse(storedProgress);
+          this.sessionProgress.set(sessionId, parsed);
+          this.initialized.set(sessionId, true);
+          return parsed;
+        } catch (e) {
+          console.warn('Failed to restore progress from storage:', e);
+        }
+      }
+
+      return null;
     } catch (error) {
       console.error('Error getting learning progress:', error);
       return null;
@@ -126,10 +163,23 @@ class LearningProgressManager {
 
       progress.lastUpdated = new Date().toISOString();
       this.sessionProgress.set(sessionId, progress);
+      this.saveToStorage(sessionId, progress);
+
       return true;
     } catch (error) {
       console.error('Error updating learning objective:', error);
       return false;
+    }
+  }
+
+  // Save progress to session storage
+  private saveToStorage(sessionId: string, progress: LearningProgress): void {
+    try {
+      if (this.storage) {
+        this.storage.setItem(`progress_${sessionId}`, JSON.stringify(progress));
+      }
+    } catch (error) {
+      console.warn('Failed to save progress to storage:', error);
     }
   }
 
@@ -138,6 +188,9 @@ class LearningProgressManager {
     try {
       this.sessionProgress.delete(sessionId);
       this.initialized.delete(sessionId);
+      if (this.storage) {
+        this.storage.removeItem(`progress_${sessionId}`);
+      }
     } catch (error) {
       console.error('Error clearing session:', error);
     }
