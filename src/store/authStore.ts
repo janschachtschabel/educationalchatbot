@@ -19,7 +19,7 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       user: null,
-      loading: true,
+      loading: true, // Start with loading true to show initial loading state
       initialized: false,
       error: null,
       checkAuth: async () => {
@@ -35,6 +35,18 @@ export const useAuthStore = create<AuthState>()(
             lastError = error;
             console.error(`Auth check attempt ${attempt + 1} failed:`, error);
             
+            // Handle specific auth errors
+            if (error?.message?.includes('Invalid refresh token')) {
+              await auth.signOut();
+              set({ 
+                user: null, 
+                loading: false, 
+                initialized: true,
+                error: null // Don't show error to user for normal session expiry
+              });
+              return;
+            }
+            
             if (attempt < MAX_RETRIES - 1 && auth.isRetryableError(error)) {
               await new Promise(resolve => 
                 setTimeout(resolve, RETRY_DELAY * Math.pow(2, attempt))
@@ -47,8 +59,8 @@ export const useAuthStore = create<AuthState>()(
               loading: false, 
               initialized: true,
               error: auth.isSessionError(error)
-                ? 'Session expired. Please sign in again.'
-                : 'Unable to connect to authentication service'
+                ? null // Don't show error for session issues
+                : 'Fehler bei der Authentifizierung'
             });
             return;
           }
@@ -57,8 +69,9 @@ export const useAuthStore = create<AuthState>()(
       },
       signOut: async () => {
         try {
+          set({ loading: true });
           await auth.signOut();
-          set({ user: null, error: null });
+          set({ user: null, error: null, loading: false });
         } catch (error) {
           console.error('Sign out error:', error);
           // Force cleanup on error
@@ -72,15 +85,9 @@ export const useAuthStore = create<AuthState>()(
       name: 'auth-storage',
       partialize: (state) => ({ user: state.user }),
       onRehydrateStorage: () => (state) => {
-        // Verify the stored auth state on rehydration
-        if (state?.user) {
-          auth.getCurrentUser()
-            .then(user => {
-              if (!user || user.id !== state.user?.id) {
-                state.signOut();
-              }
-            })
-            .catch(() => state.signOut());
+        if (state) {
+          // Verify the stored auth state immediately after rehydration
+          state.checkAuth().catch(console.error);
         }
       }
     }
@@ -117,4 +124,5 @@ const initAuth = async () => {
   });
 };
 
+// Initialize auth immediately
 initAuth();

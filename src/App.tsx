@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { Bot, LogOut, User, Home, Grid, Shield } from 'lucide-react';
 import Welcome from './pages/Welcome';
@@ -18,8 +18,20 @@ import { useLanguageStore } from './lib/useTranslations';
 
 function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const { user, signOut } = useAuthStore();
+  const { user, loading, initialized, signOut } = useAuthStore();
   const { t } = useLanguageStore();
+
+  // Show loading state only during initial load
+  if (!initialized) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center">
+        <div className="text-center">
+          <Bot className="h-12 w-12 text-indigo-600 mx-auto mb-4 animate-bounce" />
+          <div className="text-gray-600">Loading...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Router>
@@ -77,7 +89,7 @@ function App() {
                   <>
                     <span className="flex items-center gap-2">
                       <User className="h-5 w-5 text-gray-600" />
-                      <span className="text-gray-700">{user.full_name}</span>
+                      <span className="text-sm font-medium text-gray-700">{user.full_name}</span>
                     </span>
                     <button
                       onClick={() => signOut()}

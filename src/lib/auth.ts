@@ -201,12 +201,13 @@ export const auth = {
       message.includes('jwt') ||
       message.includes('token') ||
       code === 'PGRST301' ||
-      code === '401'
+      code === '401' ||
+      code === 'refresh_token_not_found'
     );
   },
 
   normalizeError(error: any): Error {
-    const message = error?.message || 'An unknown error occurred';
+    const message = error?.message || 'Ein unbekannter Fehler ist aufgetreten';
     
     if (message.includes('User already registered')) {
       return new Error('Diese E-Mail-Adresse wird bereits verwendet');
