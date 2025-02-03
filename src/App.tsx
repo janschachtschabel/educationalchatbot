@@ -10,6 +10,7 @@ import CreateChatbot from './pages/CreateChatbot';
 import EditChatbot from './pages/EditChatbot';
 import AdminPanel from './pages/AdminPanel';
 import AuthorProfile from './pages/AuthorProfile';
+import Setup from './pages/Setup';
 import AuthModal from './components/AuthModal';
 import ProtectedRoute from './components/ProtectedRoute';
 import LanguageSwitcher from './components/LanguageSwitcher';
@@ -115,8 +116,10 @@ function App() {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Routes>
             <Route path="/" element={<Welcome />} />
+            <Route path="/setup" element={<Setup />} />
             <Route path="/gallery" element={<Gallery />} />
-            <Route path="/access" element={<AccessCode />} />
+            <Route path="/chat/:id" element={<ChatInterface />} />
+            <Route path="/access/:code" element={<AccessCode />} />
             <Route path="/admin" element={
               <ProtectedRoute requireAdmin={true}>
                 <AdminPanel />
@@ -146,7 +149,6 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="/chat/:id" element={<ChatInterface />} />
             <Route path="/author/:id" element={<AuthorProfile />} />
           </Routes>
         </main>
