@@ -142,10 +142,27 @@ async function createAdminUser(supabase) {
 }
 
 exports.handler = async function(event, context) {
+  // CORS Headers
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, x-setup-token',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json'
+  };
+
+  // Handle OPTIONS request (CORS preflight)
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 204,
+      headers
+    };
+  }
+
   // Nur POST-Anfragen erlauben
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
+      headers,
       body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
@@ -156,6 +173,7 @@ exports.handler = async function(event, context) {
   if (!setupToken || providedToken !== setupToken) {
     return {
       statusCode: 401,
+      headers,
       body: JSON.stringify({ error: 'Unauthorized' })
     };
   }
@@ -179,6 +197,10 @@ exports.handler = async function(event, context) {
       .limit(1)
       .catch(() => ({ data: null, error: null }));
 
+    if (testError) {
+      throw new Error(`Database connection failed: ${testError.message}`);
+    }
+
     // Execute migrations
     await executeMigrations(supabase);
 
@@ -195,6 +217,7 @@ exports.handler = async function(event, context) {
 
     return {
       statusCode: 200,
+      headers,
       body: JSON.stringify({
         success: true,
         message: 'Setup completed successfully. Database schema has been created and admin user has been set up.',
@@ -208,6 +231,7 @@ exports.handler = async function(event, context) {
     console.error('Setup error:', error);
     return {
       statusCode: 500,
+      headers,
       body: JSON.stringify({
         error: 'Setup failed',
         details: error.message,
