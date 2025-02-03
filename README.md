@@ -97,28 +97,29 @@ Password: password
 
 For local development:
 
-1. Clone the repository:
-   ```bash
-   git clone [repository-url]
-   cd edubot
-   ```
-
-2. Install dependencies:
+1. Install dependencies:
    ```bash
    npm install
    ```
 
+2. Install Netlify CLI globally:
+   ```bash
+   npm install -g netlify-cli
+   ```
+
 3. Create a `.env` file with the required variables:
    ```env
-   NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+   VITE_SUPABASE_URL=your_supabase_url
    SUPABASE_SERVICE_KEY=your_supabase_service_key
    SETUP_TOKEN=your_secure_setup_token
    ```
 
-4. Start the development server:
+4. Start the development server with Netlify Functions:
    ```bash
-   npm run dev
+   netlify dev
    ```
+
+This will start both the Vite dev server and the Netlify Functions locally.
 
 ## Development
 

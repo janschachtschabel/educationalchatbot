@@ -13,7 +13,8 @@ export default function Setup() {
       setIsLoading(true);
       setStatus('Running setup...');
       
-      const response = await fetch('/api/setup', {
+      // Verwende den korrekten Netlify Function Pfad
+      const response = await fetch('/.netlify/functions/setup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -32,13 +33,16 @@ Email: ${data.adminCredentials.email}
 Password: ${data.adminCredentials.password}
 
 ⚠️ Please change these credentials immediately after login.`);
-        
-        // Don't redirect automatically so user can see the credentials
       } else {
-        setStatus(`Setup failed: ${data.error}\n${data.help || ''}`);
+        setStatus(`Setup failed: ${data.error}
+Details: ${data.details || 'No details available'}
+${data.help || ''}`);
       }
-    } catch (error) {
-      setStatus('Setup failed: Network error');
+    } catch (error: any) {
+      console.error('Setup error:', error);
+      setStatus(`Setup failed: ${error.message}
+If you're running locally, make sure the Netlify Functions are running.
+For production, ensure the function is properly deployed.`);
     } finally {
       setIsLoading(false);
     }
