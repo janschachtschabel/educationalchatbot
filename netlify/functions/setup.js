@@ -150,6 +150,20 @@ exports.handler = async function(event, context) {
     'Content-Type': 'application/json'
   };
 
+  // Debug: Log environment variables
+  console.log('Environment variables:', {
+    hasSetupToken: !!process.env.SETUP_TOKEN,
+    setupTokenValue: process.env.SETUP_TOKEN,
+    hasSupabaseUrl: !!process.env.VITE_SUPABASE_URL,
+    hasServiceKey: !!process.env.SUPABASE_SERVICE_KEY
+  });
+
+  // Debug: Log request headers
+  console.log('Request headers:', {
+    providedToken: event.headers['x-setup-token'],
+    contentType: event.headers['content-type']
+  });
+
   // Handle OPTIONS request (CORS preflight)
   if (event.httpMethod === 'OPTIONS') {
     return {
@@ -163,7 +177,13 @@ exports.handler = async function(event, context) {
     return {
       statusCode: 405,
       headers,
-      body: JSON.stringify({ error: 'Method not allowed' })
+      body: JSON.stringify({ 
+        error: 'Method not allowed',
+        debug: {
+          method: event.httpMethod,
+          hasSetupToken: !!process.env.SETUP_TOKEN
+        }
+      })
     };
   }
 
@@ -174,7 +194,15 @@ exports.handler = async function(event, context) {
     return {
       statusCode: 401,
       headers,
-      body: JSON.stringify({ error: 'Unauthorized' })
+      body: JSON.stringify({ 
+        error: 'Unauthorized',
+        debug: {
+          hasSetupToken: !!process.env.SETUP_TOKEN,
+          providedTokenLength: providedToken?.length,
+          setupTokenLength: setupToken?.length,
+          tokenMatch: providedToken === setupToken
+        }
+      })
     };
   }
 

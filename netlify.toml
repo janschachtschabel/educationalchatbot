@@ -3,6 +3,16 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  port = 8888
+  publish = "dist"
+
+# Development environment variables
+[dev.environment]
+  SETUP_TOKEN = "development_setup_token"
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
