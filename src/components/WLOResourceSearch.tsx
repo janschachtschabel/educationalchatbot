@@ -12,6 +12,9 @@ import {
 } from '../lib/constants';
 import { ResourceCard } from './preview/components/ResourceCard';
 
+// Base URL for WLO previews
+const WLO_BASE_URL = 'https://redaktion.openeduhub.net';
+
 interface WLOResourceSearchProps {
   onSelect: (resources: any[]) => void;
   selectedResources: any[];
@@ -27,6 +30,28 @@ export default function WLOResourceSearch({ onSelect, selectedResources }: WLORe
   const [results, setResults] = useState<any[]>([]);
   const [error, setError] = useState('');
 
+  // Helper function to fix preview URLs
+  const fixPreviewUrl = (url: string) => {
+    if (!url) return null;
+    
+    // If URL starts with /edu-sharing, prepend the base URL
+    if (url.startsWith('/edu-sharing')) {
+      return `${WLO_BASE_URL}${url}`;
+    }
+    
+    // If URL contains /api/edu-sharing, replace with correct base
+    if (url.includes('/api/edu-sharing')) {
+      return url.replace(/.*\/api\/edu-sharing/, `${WLO_BASE_URL}/edu-sharing`);
+    }
+
+    // If URL contains the Vercel domain, replace it with the correct base
+    if (url.includes('.vercel.app/edu-sharing')) {
+      return url.replace(/https?:\/\/[^\/]+\/edu-sharing/, `${WLO_BASE_URL}/edu-sharing`);
+    }
+
+    return url;
+  };
+
   const handleSearch = async () => {
     if (!searchTerm && !subject && !educationLevel && !resourceType) {
       setError('Please enter search criteria');
@@ -41,25 +66,21 @@ export default function WLOResourceSearch({ onSelect, selectedResources }: WLORe
       const properties = [];
       const values = [];
 
-      // Always add search term if present
       if (searchTerm) {
         properties.push('cclom:title');
         values.push(searchTerm);
       }
 
-      // Add subject with URI mapping
       if (subject) {
         properties.push('ccm:taxonid');
         values.push(FACH_MAPPING[subject as keyof typeof FACH_MAPPING]);
       }
 
-      // Add education level with URI mapping
       if (educationLevel) {
         properties.push('ccm:educationalcontext');
         values.push(BILDUNGSSTUFE_MAPPING[educationLevel as keyof typeof BILDUNGSSTUFE_MAPPING]);
       }
 
-      // Add resource type with URI mapping
       if (resourceType) {
         properties.push('ccm:oeh_lrt_aggregated');
         values.push(INHALTSTYP_MAPPING[resourceType as keyof typeof INHALTSTYP_MAPPING]);
@@ -78,7 +99,7 @@ export default function WLOResourceSearch({ onSelect, selectedResources }: WLORe
           name: node.properties['cclom:title']?.[0] || 'Untitled',
           properties: node.properties,
           preview: {
-            url: node.preview?.url || null
+            url: fixPreviewUrl(node.preview?.url) || null
           },
           url: node.properties['ccm:wwwurl']?.[0] || null,
           title: node.properties['cclom:title']?.[0] || 'Untitled',
@@ -103,7 +124,15 @@ export default function WLOResourceSearch({ onSelect, selectedResources }: WLORe
     if (isSelected) {
       onSelect(selectedResources.filter(r => r.id !== resource.id));
     } else {
-      onSelect([...selectedResources, resource]);
+      // Fix preview URL before adding to selected resources
+      const fixedResource = {
+        ...resource,
+        preview: {
+          ...resource.preview,
+          url: fixPreviewUrl(resource.preview?.url)
+        }
+      };
+      onSelect([...selectedResources, fixedResource]);
     }
   };
 
