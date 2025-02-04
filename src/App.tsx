@@ -75,7 +75,7 @@ function App() {
                 {/* Logo */}
                 <Link to="/" className="flex items-center">
                   <Bot className="h-8 w-8 text-indigo-600" />
-                  <span className="ml-2 text-2xl font-bold text-gray-900">EduBot</span>
+                  <span className="ml-2 text-2xl font-bold text-gray-900">WLO-Bot</span>
                 </Link>
 
                 {/* Navigation Links */}

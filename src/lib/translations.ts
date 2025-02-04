@@ -103,7 +103,7 @@ const translations = {
       conversationStarter: 'Gesprächsstarter'
     },
     welcome: {
-      title: 'Willkommen bei EduBot',
+      title: 'Willkommen bei WLO-Bot',
       subtitle: 'Gestalten Sie Ihren Unterricht mit KI-Chatbots, die perfekt auf Ihre pädagogischen Ziele abgestimmt sind.',
       forTeachers: 'Für Lehrkräfte',
       forTeachersDesc: 'Erstellen Sie maßgeschneiderte KI-Assistenten und integrieren Sie Ihre Lehrmaterialien für personalisierte Lernerfahrungen.',
@@ -115,6 +115,9 @@ const translations = {
         resourceIntegration: 'Materialintegration',
         resourceIntegrationDesc: 'Binden Sie Ihre Lehrmaterialien nahtlos in die Chatbots ein'
       }
+    },
+    accessCode: {
+      title: 'Willkommen bei WLO-Bot'
     },
     gallery: {
       title: 'Chatbot-Galerie',
@@ -244,7 +247,7 @@ const translations = {
       conversationStarter: 'Conversation Starter'
     },
     welcome: {
-      title: 'Welcome to EduBot',
+      title: 'Welcome to WLO-Bot',
       subtitle: 'Shape your teaching with AI chatbots perfectly aligned with your pedagogical goals.',
       forTeachers: 'For Teachers',
       forTeachersDesc: 'Create custom AI assistants and integrate your teaching materials for personalized learning experiences.',
@@ -256,6 +259,9 @@ const translations = {
         resourceIntegration: 'Resource Integration',
         resourceIntegrationDesc: 'Seamlessly integrate your teaching materials into chatbots'
       }
+    },
+    accessCode: {
+      title: 'Welcome to WLO-Bot'
     },
     gallery: {
       title: 'Chatbot Gallery',

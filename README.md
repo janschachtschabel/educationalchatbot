@@ -1,6 +1,6 @@
-# EduBot - AI-Powered Educational Chatbot Platform
+# WLO-Bot - AI-Powered Educational Chatbot Platform
 
-EduBot is a comprehensive platform that enables educators to create, manage, and deploy AI-powered chatbots tailored for educational purposes. The platform integrates with WirLernenOnline (WLO) to provide access to high-quality educational resources and features an advanced learning progress tracking system.
+WLO-Bot is a comprehensive platform that enables educators to create, manage, and deploy AI-powered chatbots tailored for educational purposes. The platform integrates with WirLernenOnline (WLO) to provide access to high-quality educational resources and features an advanced learning progress tracking system.
 
 ## Features
 
@@ -47,32 +47,32 @@ EduBot is a comprehensive platform that enables educators to create, manage, and
 ### Initial Setup
 
 1. Clone the repository:
-   ```bash
+   \`\`\`bash
    git clone [repository-url]
-   cd edubot
-   ```
+   cd wlo-bot
+   \`\`\`
 
 2. Install dependencies:
-   ```bash
+   \`\`\`bash
    npm install
-   ```
+   \`\`\`
 
-3. Create a `.env` file with required environment variables:
-   ```env
+3. Create a \`.env\` file with required environment variables:
+   \`\`\`env
    VITE_SUPABASE_URL=your_supabase_url
    VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
    VITE_SETUP_TOKEN=your_secure_setup_token
-   ```
+   \`\`\`
 
 4. Run the development server:
-   ```bash
+   \`\`\`bash
    npm run dev
-   ```
+   \`\`\`
 
 5. Access the setup page:
-   ```
+   \`\`\`
    http://localhost:5173/setup
-   ```
+   \`\`\`
 
    The setup page will:
    - Check if the database is empty
@@ -93,33 +93,33 @@ EduBot is a comprehensive platform that enables educators to create, manage, and
 
 The project structure follows a modular organization:
 
-```
+\`\`\`
 src/
 ├── components/     # Reusable UI components
 ├── lib/           # Utilities and shared functions
 ├── pages/         # Page components
 ├── store/         # State management
 └── types/         # TypeScript type definitions
-```
+\`\`\`
 
 ### Building
 
-```bash
+\`\`\`bash
 npm run build
-```
+\`\`\`
 
-The build output will be in the `dist/` directory.
+The build output will be in the \`dist/\` directory.
 
 ## Deployment
 
-The application is configured for deployment on Netlify. The `vercel.json` configuration handles API proxying and routing.
+The application is configured for deployment on Netlify. The \`vercel.json\` configuration handles API proxying and routing.
 
 ### Environment Variables
 
 Required environment variables for production:
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
-- `VITE_SETUP_TOKEN` (for initial setup only)
+- \`VITE_SUPABASE_URL\`
+- \`VITE_SUPABASE_ANON_KEY\`
+- \`VITE_SETUP_TOKEN\` (for initial setup only)
 
 ## Contributing
 
