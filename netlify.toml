@@ -1,0 +1,28 @@
+[[redirects]]
+  from = "/api/edu-sharing/*"
+  to = "https://redaktion.openeduhub.net/edu-sharing/:splat"
+  status = 200
+  force = true
+  headers = {
+    Access-Control-Allow-Origin = "*",
+    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS",
+    Access-Control-Allow-Headers = "X-Requested-With, Content-Type, Accept, Authorization"
+  }
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  port = 8888
+  publish = "dist"

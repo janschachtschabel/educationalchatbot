@@ -1,11 +1,13 @@
 import React from 'react';
 import { useLanguageStore } from '../lib/useTranslations';
+import ConnectionIndicator from './ConnectionIndicator';
 
 export default function LanguageSwitcher() {
   const { language, setLanguage } = useLanguageStore();
 
   return (
     <div className="flex items-center gap-2">
+      <ConnectionIndicator />
       <button
         onClick={() => setLanguage('de')}
         className={`w-8 h-6 rounded overflow-hidden border-2 transition ${

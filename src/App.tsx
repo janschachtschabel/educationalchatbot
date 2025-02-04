@@ -16,11 +16,42 @@ import LanguageSwitcher from './components/LanguageSwitcher';
 import Setup from './pages/Setup';
 import { useAuthStore } from './store/authStore';
 import { useLanguageStore } from './lib/useTranslations';
+import { auth } from './lib/auth';
 
 function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const { user, loading, initialized, signOut } = useAuthStore();
+  const { user, loading, initialized } = useAuthStore();
   const { t } = useLanguageStore();
+
+  // Initialize auth state
+  useEffect(() => {
+    let authSubscription: { unsubscribe: () => void } | null = null;
+
+    const initAuth = async () => {
+      try {
+        // Initial auth check
+        const currentUser = await auth.getCurrentUser();
+        useAuthStore.getState().setUser(currentUser);
+        
+        // Set up auth state change listener
+        authSubscription = auth.onAuthStateChange(async (user) => {
+          useAuthStore.getState().setUser(user);
+        });
+      } catch (error) {
+        console.error('Auth initialization error:', error);
+        useAuthStore.getState().setUser(null);
+      }
+    };
+
+    void initAuth();
+
+    // Cleanup
+    return () => {
+      if (authSubscription?.unsubscribe) {
+        authSubscription.unsubscribe();
+      }
+    };
+  }, []);
 
   // Show loading state only during initial load
   if (!initialized) {
@@ -28,7 +59,7 @@ function App() {
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center">
         <div className="text-center">
           <Bot className="h-12 w-12 text-indigo-600 mx-auto mb-4 animate-bounce" />
-          <div className="text-gray-600">Loading...</div>
+          <div className="text-gray-600">{t.common.loading}</div>
         </div>
       </div>
     );
@@ -78,7 +109,7 @@ function App() {
                       className="flex items-center gap-2 text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
                     >
                       <Shield className="h-4 w-4" />
-                      Admin
+                      {t.nav.admin}
                     </Link>
                   )}
                 </div>
@@ -93,7 +124,7 @@ function App() {
                       <span className="text-sm font-medium text-gray-700">{user.full_name}</span>
                     </span>
                     <button
-                      onClick={() => signOut()}
+                      onClick={() => useAuthStore.getState().signOut()}
                       className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
                     >
                       <LogOut className="h-5 w-5" />

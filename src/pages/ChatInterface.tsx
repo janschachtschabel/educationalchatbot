@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, Bot, User, ArrowLeft, MessageSquare, AlertCircle } from 'lucide-react';
+import { Send, Bot, User, ArrowLeft, MessageSquare, AlertCircle } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { supabase } from '../lib/supabase';
@@ -8,7 +8,7 @@ import { useAuthStore } from '../store/authStore';
 import { useLanguageStore } from '../lib/useTranslations';
 import WLOResourceList from '../components/WLOResourceList';
 import LearningProgressTracker from '../components/LearningProgressTracker';
-import { learningProgress, DEFAULT_OBJECTIVES } from '../lib/learningProgress';
+import { learningProgress } from '../lib/learningProgress';
 
 interface Message {
   id: string;
@@ -280,13 +280,8 @@ Do not include any additional text or explanation.`
         });
       } catch (parseError) {
         console.error('Error parsing evaluation:', parseError);
-        // Set default progress values instead of failing
-        DEFAULT_OBJECTIVES.forEach(obj => {
-          learningProgress.updateObjective(sessionId, obj.id, {
-            confidence: 0,
-            status: 'not_started'
-          });
-        });
+        // Don't fail silently - throw error to trigger retry
+        throw parseError;
       }
     } catch (error) {
       console.error('Error evaluating learning progress:', error);
@@ -427,7 +422,7 @@ Do not include any additional text or explanation.`
   return (
     <div className="max-w-7xl mx-auto px-4">
       <div className="flex gap-4">
-        {/* Left Sidebar - Learning Progress (now for all users) */}
+        {/* Left Sidebar - Learning Progress */}
         {chatbot?.enabled_tools?.includes('learning_progress') && (
           <div className="w-64 shrink-0">
             <div className="sticky top-4">
@@ -526,13 +521,6 @@ Do not include any additional text or explanation.`
                 if (message.trim()) handleUserMessage(message);
               }} className="border-t border-gray-200 p-4">
                 <div className="flex gap-4">
-                  <button
-                    type="button"
-                    className="p-2 hover:bg-gray-100 rounded-full transition"
-                    title={t.chat.uploadFile}
-                  >
-                    <Paperclip className="h-5 w-5 text-gray-500" />
-                  </button>
                   <div className="flex-1 flex gap-4">
                     <input
                       type="text"

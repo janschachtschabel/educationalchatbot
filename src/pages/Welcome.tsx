@@ -48,7 +48,7 @@ export default function Welcome() {
               to="/dashboard"
               className="block w-full bg-indigo-600 text-white text-center px-6 py-3 rounded-lg hover:bg-indigo-700 transition-colors duration-300 font-medium"
             >
-              Zum Lehrkräfte-Dashboard
+              {t.nav.teachers}
             </Link>
           </div>
         </div>
@@ -60,11 +60,10 @@ export default function Welcome() {
               <div className="bg-white rounded-full p-3">
                 <GraduationCap className="h-8 w-8 text-emerald-600" />
               </div>
-              <h2 className="text-2xl font-bold text-white">Chatbot-Galerie</h2>
+              <h2 className="text-2xl font-bold text-white">{t.nav.gallery}</h2>
             </div>
             <p className="text-emerald-100 text-lg">
-              Entdecken Sie KI-Chatbots, die von Lehrkräften für Lernende erstellt wurden. 
-              Verbessern Sie Ihr Lernerlebnis mit interaktiver Unterstützung.
+              {t.welcome.forTeachersDesc}
             </p>
           </div>
           <div className="p-6">
@@ -72,7 +71,7 @@ export default function Welcome() {
               to="/gallery"
               className="block w-full bg-emerald-600 text-white text-center px-6 py-3 rounded-lg hover:bg-emerald-700 transition-colors duration-300 font-medium"
             >
-              Zur Chatbot-Galerie
+              {t.nav.gallery}
             </Link>
           </div>
         </div>
@@ -80,22 +79,22 @@ export default function Welcome() {
 
       {/* Features */}
       <div className="bg-white rounded-2xl shadow-lg p-8 max-w-5xl w-full mb-8">
-        <h3 className="text-2xl font-bold text-gray-900 mb-8 text-center">Funktionen</h3>
+        <h3 className="text-2xl font-bold text-gray-900 mb-8 text-center">Features</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           <Feature
             icon={<Rocket className="h-6 w-6" />}
-            title="Intelligente Chatbots"
-            description="Erstellen Sie KI-Assistenten, die perfekt auf Ihre Lehrinhalte abgestimmt sind"
+            title={t.welcome.features.customChatbots}
+            description={t.welcome.features.customChatbotsDesc}
           />
           <Feature
             icon={<Sparkles className="h-6 w-6" />}
-            title="Smarte Werkzeuge"
-            description="Nutzen Sie Websuche und Dokumentenanalyse für fundierte Antworten"
+            title={t.welcome.features.smartTools}
+            description={t.welcome.features.smartToolsDesc}
           />
           <Feature
             icon={<BookOpen className="h-6 w-6" />}
-            title="Materialintegration"
-            description="Binden Sie Ihre Lehrmaterialien nahtlos in die Chatbots ein"
+            title={t.welcome.features.resourceIntegration}
+            description={t.welcome.features.resourceIntegrationDesc}
           />
         </div>
       </div>
@@ -108,7 +107,7 @@ export default function Welcome() {
             className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition"
           >
             <Shield className="h-4 w-4" />
-            Admin Panel
+            {t.nav.admin}
           </Link>
         </div>
       )}

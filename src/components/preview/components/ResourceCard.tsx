@@ -1,6 +1,9 @@
 import React from 'react';
 import { ExternalLink } from 'lucide-react';
 
+// Base URL for WLO previews
+const WLO_BASE_URL = 'https://redaktion.openeduhub.net';
+
 interface ResourceCardProps {
   resource: {
     name: string;
@@ -18,6 +21,20 @@ interface ResourceCardProps {
   };
 }
 
+// Helper function to fix preview URLs
+const fixPreviewUrl = (url: string) => {
+  if (!url) return null;
+  // If URL starts with /edu-sharing, prepend the base URL
+  if (url.startsWith('/edu-sharing')) {
+    return `${WLO_BASE_URL}${url}`;
+  }
+  // If URL contains /api/edu-sharing, replace with correct base
+  if (url.includes('/api/edu-sharing')) {
+    return url.replace(/.*\/api\/edu-sharing/, `${WLO_BASE_URL}/edu-sharing`);
+  }
+  return url;
+};
+
 export function ResourceCard({ resource }: ResourceCardProps) {
   const title = resource.properties?.['cclom:title']?.[0] || resource.name;
   const description = resource.properties?.['cclom:general_description']?.[0];
@@ -32,7 +49,7 @@ export function ResourceCard({ resource }: ResourceCardProps) {
         {resource.preview?.url && (
           <div className="h-40 mb-2 relative">
             <img
-              src={resource.preview.url}
+              src={fixPreviewUrl(resource.preview.url)}
               alt={title}
               className="absolute inset-0 w-full h-full object-cover rounded"
               loading="lazy"

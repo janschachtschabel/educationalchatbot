@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { withRetry } from './supabase';
+import { withConnectionCheck } from './supabase';
 
 export interface AIConfig {
   provider: string;
@@ -89,7 +89,7 @@ async function fetchWithRetry(
 
     if (error instanceof Error) {
       if (error.name === 'AbortError') {
-        throw new Error('Die Anfrage hat zu lange gedauert. Bitte versuchen Sie es erneut.');
+        throw new Error('Die Anfrage hat zu lange gedauert. Bitte versuchen Sie es später erneut.');
       }
 
       // Retry on network errors
@@ -107,7 +107,7 @@ export const ai = {
   async getChatbotConfig(): Promise<AIConfig> {
     try {
       // Try to get admin settings with retry
-      const { data: adminSettings, error: adminError } = await withRetry(async () => 
+      const { data: adminSettings, error: adminError } = await withConnectionCheck(async () => 
         supabase
           .from('admin_settings')
           .select('provider, model, api_key, base_url, superprompt')
@@ -173,7 +173,7 @@ export const ai = {
     try {
       const queryEmbedding = await this.getEmbeddings(query, config);
 
-      const { data: documents, error } = await withRetry(async () =>
+      const { data: documents, error } = await withConnectionCheck(async () =>
         supabase
           .rpc('match_documents', {
             query_embedding: queryEmbedding,

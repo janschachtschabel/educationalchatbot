@@ -6,8 +6,25 @@ interface WLOResourceListProps {
   orientation?: 'horizontal' | 'vertical';
 }
 
+// Base URL for WLO previews
+const WLO_BASE_URL = 'https://redaktion.openeduhub.net';
+
 export default function WLOResourceList({ resources, orientation = 'vertical' }: WLOResourceListProps) {
   if (!resources.length) return null;
+
+  // Helper function to fix preview URLs
+  const fixPreviewUrl = (url: string) => {
+    if (!url) return null;
+    // If URL starts with /edu-sharing, prepend the base URL
+    if (url.startsWith('/edu-sharing')) {
+      return `${WLO_BASE_URL}${url}`;
+    }
+    // If URL contains /api/edu-sharing, replace with correct base
+    if (url.includes('/api/edu-sharing')) {
+      return url.replace(/.*\/api\/edu-sharing/, `${WLO_BASE_URL}/edu-sharing`);
+    }
+    return url;
+  };
 
   return (
     <div className={`grid gap-4 ${
@@ -20,7 +37,7 @@ export default function WLOResourceList({ resources, orientation = 'vertical' }:
           {/* Preview Image */}
           {(resource.preview?.url || resource.preview_url) ? (
             <img
-              src={resource.preview?.url || resource.preview_url}
+              src={fixPreviewUrl(resource.preview?.url || resource.preview_url)}
               alt={resource.name || resource.properties?.['cclom:title']?.[0] || 'Resource preview'}
               className="w-full h-32 object-cover"
               loading="lazy"

@@ -7,6 +7,7 @@ interface AuthState {
   loading: boolean;
   initialized: boolean;
   error: string | null;
+  setUser: (user: UserProfile | null) => void;
   checkAuth: () => Promise<void>;
   signOut: () => Promise<void>;
   clearError: () => void;
@@ -19,6 +20,7 @@ export const useAuthStore = create<AuthState>()(
       loading: true,
       initialized: false,
       error: null,
+      setUser: (user) => set({ user, initialized: true, loading: false }),
       checkAuth: async () => {
         set({ loading: true, error: null });
         try {
@@ -52,43 +54,10 @@ export const useAuthStore = create<AuthState>()(
       partialize: (state) => ({ user: state.user }),
       onRehydrateStorage: () => (state) => {
         if (state) {
-          // Verify the stored auth state immediately after rehydration
+          // Verify the stored auth state
           state.checkAuth();
         }
       }
     }
   )
 );
-
-// Initialize auth state and set up auth state change listener
-let authSubscription: { unsubscribe: () => void } | null = null;
-
-const initAuth = async () => {
-  // Clean up existing subscription
-  if (authSubscription?.unsubscribe) {
-    authSubscription.unsubscribe();
-  }
-
-  // Initial auth check
-  await useAuthStore.getState().checkAuth();
-  
-  // Set up new subscription
-  authSubscription = auth.onAuthStateChange(async (user) => {
-    useAuthStore.setState({ 
-      user, 
-      loading: false, 
-      initialized: true, 
-      error: null 
-    });
-  });
-
-  // Clean up on window unload
-  window.addEventListener('unload', () => {
-    if (authSubscription?.unsubscribe) {
-      authSubscription.unsubscribe();
-    }
-  });
-};
-
-// Initialize auth immediately
-initAuth();
