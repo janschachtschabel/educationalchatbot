@@ -2,12 +2,19 @@ import React, { useState, useRef } from 'react';
 import { FileText, Upload, X, AlertCircle, Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLanguageStore } from '../lib/useTranslations';
-import { ai } from '../lib/ai';
+import { extractTextFromPDF, splitTextIntoChunks } from '../lib/pdfUtils';
 import { useAuthStore } from '../store/authStore';
 
 interface DocumentUploadAreaProps {
   chatbotId: string;
   onUploadComplete: () => void;
+}
+
+interface ProcessingFile {
+  name: string;
+  status: 'uploading' | 'processing' | 'completed' | 'error';
+  progress?: number;
+  error?: string;
 }
 
 export default function DocumentUploadArea({ chatbotId, onUploadComplete }: DocumentUploadAreaProps) {
@@ -18,31 +25,27 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [processingFiles, setProcessingFiles] = useState<{
-    [key: string]: {
-      name: string;
-      status: 'uploading' | 'processing' | 'completed' | 'error';
-      error?: string;
-    };
+    [key: string]: ProcessingFile;
   }>({});
 
   const allowedTypes = [
     'application/pdf',
     'text/plain',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'application/msword',
-    'application/vnd.ms-powerpoint'
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   ];
+
+  const updateFileProgress = (fileId: string, progress: number) => {
+    setProcessingFiles(prev => ({
+      ...prev,
+      [fileId]: {
+        ...prev[fileId],
+        progress
+      }
+    }));
+  };
 
   const handleFileUpload = async (files: FileList) => {
     if (!user) return;
-
-    // Get AI config for document processing
-    const config = await ai.getChatbotConfig(user.id);
-    if (!config) {
-      setError('AI configuration not found');
-      return;
-    }
 
     setError('');
     setUploading(true);
@@ -88,6 +91,30 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
         }
 
         try {
+          // Extract text from file
+          let text = '';
+          if (file.type === 'application/pdf') {
+            setProcessingFiles(prev => ({
+              ...prev,
+              [fileId]: {
+                ...prev[fileId],
+                status: 'processing',
+                progress: 0
+              }
+            }));
+
+            text = await extractTextFromPDF(file, (progress) => {
+              updateFileProgress(fileId, progress);
+            });
+          } else if (file.type === 'text/plain') {
+            text = await file.text();
+          } else {
+            throw new Error('Unsupported file type');
+          }
+
+          // Split text into chunks
+          const chunks = splitTextIntoChunks(text);
+
           // Upload file to storage
           const fileExt = file.name.split('.').pop();
           const fileName = `${chatbotId}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
@@ -102,16 +129,7 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
             .from('documents')
             .getPublicUrl(fileName);
 
-          // Update status to processing
-          setProcessingFiles(prev => ({
-            ...prev,
-            [fileId]: {
-              name: file.name,
-              status: 'processing'
-            }
-          }));
-
-          // Create document record
+          // Create document record with content and metadata
           const { data: docData, error: docError } = await supabase
             .from('chatbot_documents')
             .insert([{
@@ -119,14 +137,30 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
               filename: file.name,
               file_type: file.type,
               file_url: publicUrl,
+              content: text,
+              metadata: {
+                original_size: file.size,
+                chunk_count: chunks.length,
+                processing_date: new Date().toISOString()
+              }
             }])
             .select()
             .single();
 
           if (docError) throw docError;
 
-          // Process document for embeddings
-          await ai.processDocument(chatbotId, docData.id, config);
+          // Process document chunks for embeddings
+          if (docData) {
+            for (let i = 0; i < chunks.length; i++) {
+              await supabase
+                .from('document_embeddings')
+                .insert([{
+                  chatbot_id: chatbotId,
+                  document_id: docData.id,
+                  content: chunks[i]
+                }]);
+            }
+          }
 
           // Update status to completed
           setProcessingFiles(prev => ({
@@ -143,7 +177,7 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
             [fileId]: {
               name: file.name,
               status: 'error',
-              error: t.common.error
+              error: err instanceof Error ? err.message : t.common.error
             }
           }));
         }
@@ -212,7 +246,7 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
           type="file"
           ref={fileInputRef}
           className="hidden"
-          accept=".pdf,.txt,.docx,.pptx,.doc,.ppt"
+          accept=".pdf,.txt,.docx"
           multiple
           onChange={(e) => {
             if (e.target.files) {
@@ -271,6 +305,14 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
               {file.error && (
                 <p className="text-sm text-red-600">{file.error}</p>
               )}
+              {file.progress !== undefined && (
+                <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
+                  <div
+                    className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${file.progress}%` }}
+                  />
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -280,7 +322,9 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
             {file.status === 'processing' && (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent" />
-                <span className="text-sm">Processing...</span>
+                <span className="text-sm">
+                  {file.progress !== undefined ? `${Math.round(file.progress)}%` : 'Processing...'}
+                </span>
               </>
             )}
             {file.status === 'completed' && (

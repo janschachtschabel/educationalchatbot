@@ -12,66 +12,32 @@ interface AuthState {
   clearError: () => void;
 }
 
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000;
-
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       user: null,
-      loading: true, // Start with loading true to show initial loading state
+      loading: true,
       initialized: false,
       error: null,
       checkAuth: async () => {
         set({ loading: true, error: null });
-        
-        let lastError;
-        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-          try {
-            const user = await auth.getCurrentUser();
-            set({ user, loading: false, initialized: true, error: null });
-            return;
-          } catch (error) {
-            lastError = error;
-            console.error(`Auth check attempt ${attempt + 1} failed:`, error);
-            
-            // Handle specific auth errors
-            if (error?.message?.includes('Invalid refresh token')) {
-              await auth.signOut();
-              set({ 
-                user: null, 
-                loading: false, 
-                initialized: true,
-                error: null // Don't show error to user for normal session expiry
-              });
-              return;
-            }
-            
-            if (attempt < MAX_RETRIES - 1 && auth.isRetryableError(error)) {
-              await new Promise(resolve => 
-                setTimeout(resolve, RETRY_DELAY * Math.pow(2, attempt))
-              );
-              continue;
-            }
-            
-            set({ 
-              user: null, 
-              loading: false, 
-              initialized: true,
-              error: auth.isSessionError(error)
-                ? null // Don't show error for session issues
-                : 'Fehler bei der Authentifizierung'
-            });
-            return;
-          }
+        try {
+          const user = await auth.getCurrentUser();
+          set({ user, loading: false, initialized: true, error: null });
+        } catch (error) {
+          console.error('Auth check error:', error);
+          set({ 
+            user: null, 
+            loading: false, 
+            initialized: true,
+            error: 'Authentication error'
+          });
         }
-        throw lastError;
       },
       signOut: async () => {
         try {
-          set({ loading: true });
           await auth.signOut();
-          set({ user: null, error: null, loading: false });
+          set({ user: null, error: null });
         } catch (error) {
           console.error('Sign out error:', error);
           // Force cleanup on error
@@ -87,7 +53,7 @@ export const useAuthStore = create<AuthState>()(
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Verify the stored auth state immediately after rehydration
-          state.checkAuth().catch(console.error);
+          state.checkAuth();
         }
       }
     }

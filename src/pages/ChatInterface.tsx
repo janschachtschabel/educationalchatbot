@@ -26,6 +26,7 @@ interface ChatbotTemplate {
   enabled_tools: string[];
   creator_id: string;
   conversation_starters?: string[];
+  is_public: boolean;
 }
 
 export default function ChatInterface() {
@@ -43,6 +44,32 @@ export default function ChatInterface() {
   const [showStarters, setShowStarters] = useState(true);
   const [systemPrompt, setSystemPrompt] = useState<string>('');
   const [sessionId] = useState(() => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+
+  // Store messages in sessionStorage for anonymous users
+  useEffect(() => {
+    if (!user && messages.length > 0) {
+      sessionStorage.setItem(`chat-${id}`, JSON.stringify(messages));
+    }
+  }, [messages, id, user]);
+
+  // Load messages from sessionStorage for anonymous users
+  useEffect(() => {
+    if (!user && id) {
+      const savedMessages = sessionStorage.getItem(`chat-${id}`);
+      if (savedMessages) {
+        setMessages(JSON.parse(savedMessages));
+      }
+    }
+  }, [id, user]);
+
+  // Clean up sessionStorage when component unmounts
+  useEffect(() => {
+    return () => {
+      if (!user && id) {
+        sessionStorage.removeItem(`chat-${id}`);
+      }
+    };
+  }, [id, user]);
 
   useEffect(() => {
     if (id) {
@@ -75,7 +102,7 @@ export default function ChatInterface() {
 
   async function loadChatbot() {
     try {
-      // First try to get the chatbot directly
+      // First try to get the chatbot
       const { data: chatbot, error: chatbotError } = await supabase
         .from('chatbot_templates')
         .select('*')
@@ -94,24 +121,11 @@ export default function ChatInterface() {
         throw new Error('Dieser Chatbot ist nicht verfügbar.');
       }
 
-      // Check if chatbot is public or user is creator
-      if (!chatbot.is_public && user?.id !== chatbot.creator_id) {
-        // Check for password protection
-        const { data: passwordData, error: passwordError } = await supabase
-          .from('chatbot_passwords')
-          .select('id')
-          .eq('chatbot_id', id)
-          .eq('is_active', true)
-          .maybeSingle();
-
-        if (passwordError) throw passwordError;
-
-        // If chatbot has password protection and no password was provided
-        if (passwordData) {
-          // Redirect to gallery with chatbot ID pre-filled
-          navigate(`/gallery?chatbot=${id}`);
-          return;
-        }
+      // Check if user has access
+      const hasAccess = await checkChatbotAccess(chatbot);
+      if (!hasAccess) {
+        navigate(`/gallery?chatbot=${id}`);
+        return;
       }
 
       setChatbot(chatbot);
@@ -130,6 +144,32 @@ export default function ChatInterface() {
         : 'Der Chatbot konnte nicht geladen werden.';
       setError(errorMessage);
     }
+  }
+
+  async function checkChatbotAccess(chatbot: ChatbotTemplate): Promise<boolean> {
+    // Allow access if:
+    // 1. Chatbot is public
+    // 2. User is the creator
+    if (chatbot.is_public || user?.id === chatbot.creator_id) {
+      return true;
+    }
+
+    // For non-public chatbots, check password protection
+    const { data: passwordData, error: passwordError } = await supabase
+      .from('chatbot_passwords')
+      .select('id')
+      .eq('chatbot_id', chatbot.id)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (passwordError) {
+      console.error('Error checking password:', passwordError);
+      return false;
+    }
+
+    // If no password is set, allow access
+    // If password is set, access will be handled by the Gallery component
+    return !passwordData;
   }
 
   async function loadWloResources() {
@@ -270,10 +310,8 @@ Do not include any additional text or explanation.`
     setError(null);
 
     try {
-      // Get central admin AI config - no user ID needed
       const config = await ai.getChatbotConfig();
 
-      // Prepare messages array
       const aiMessages: AIMessage[] = [
         { role: 'system', content: systemPrompt || chatbot.system_prompt },
         ...messages.map(msg => ({
@@ -283,7 +321,6 @@ Do not include any additional text or explanation.`
         { role: 'user', content },
       ];
 
-      // Get AI response
       const { response, tokens } = await ai.chat(aiMessages, config, id);
 
       const assistantMessage: Message = {
@@ -303,13 +340,13 @@ Do not include any additional text or explanation.`
           .insert({
             chatbot_id: id,
             tokens_used: tokens,
+            user_id: user?.id // Optional - only set if user is logged in
           });
       } catch (usageError) {
         console.error('Error logging usage:', usageError);
-        // Non-critical - continue even if logging fails
       }
 
-      // Evaluate learning progress for all users
+      // Evaluate learning progress if enabled
       if (chatbot.enabled_tools?.includes('learning_progress')) {
         await evaluateLearningProgress(
           messages.concat(userMessage, assistantMessage),
@@ -324,7 +361,6 @@ Do not include any additional text or explanation.`
     } catch (error) {
       console.error('Error processing message:', error);
       
-      // Create user-friendly error message
       const errorContent = error instanceof Error 
         ? error.message
         : 'Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.';

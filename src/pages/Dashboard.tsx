@@ -60,7 +60,7 @@ function Dashboard() {
     try {
       let query = supabase
         .from('chatbot_templates')
-        .select('*')
+        .select('*, profiles:creator_id (id, full_name, author_nickname)')
         .eq('creator_id', user.id);
 
       if (view === 'public') {
@@ -73,7 +73,15 @@ function Dashboard() {
       
       if (error) throw error;
       
-      setChatbots(data || []);
+      // Transform data to include author information
+      const transformedData = data?.map(chatbot => ({
+        ...chatbot,
+        creator_id: chatbot.profiles?.id,
+        creator_name: chatbot.profiles?.full_name || 'Unknown Creator',
+        author_nickname: chatbot.profiles?.author_nickname || chatbot.profiles?.full_name || 'Unknown Author'
+      })) || [];
+
+      setChatbots(transformedData);
     } catch (error) {
       console.error('Error loading chatbots:', error);
       setError(t.common.error);

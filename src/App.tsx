@@ -13,6 +13,7 @@ import AuthorProfile from './pages/AuthorProfile';
 import AuthModal from './components/AuthModal';
 import ProtectedRoute from './components/ProtectedRoute';
 import LanguageSwitcher from './components/LanguageSwitcher';
+import Setup from './pages/Setup';
 import { useAuthStore } from './store/authStore';
 import { useLanguageStore } from './lib/useTranslations';
 
@@ -117,6 +118,7 @@ function App() {
             <Route path="/" element={<Welcome />} />
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/access" element={<AccessCode />} />
+            <Route path="/setup" element={<Setup />} />
             <Route path="/admin" element={
               <ProtectedRoute requireAdmin={true}>
                 <AdminPanel />

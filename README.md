@@ -41,10 +41,10 @@ EduBot is a comprehensive platform that enables educators to create, manage, and
 
 - Node.js 18 or higher
 - npm 9 or higher
-- Supabase account
+- Supabase project with database access
 - OpenAI API key or compatible LLM provider
 
-### Installation
+### Initial Setup
 
 1. Clone the repository:
    ```bash
@@ -57,26 +57,41 @@ EduBot is a comprehensive platform that enables educators to create, manage, and
    npm install
    ```
 
-3. Create a `.env` file with your Supabase credentials:
+3. Create a `.env` file with required environment variables:
    ```env
    VITE_SUPABASE_URL=your_supabase_url
    VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+   VITE_SETUP_TOKEN=your_secure_setup_token
    ```
 
-4. Start the development server:
+4. Run the development server:
    ```bash
    npm run dev
    ```
 
+5. Access the setup page:
+   ```
+   http://localhost:5173/setup
+   ```
+
+   The setup page will:
+   - Check if the database is empty
+   - Verify database connections
+   - Create the admin user
+   - Set up required storage buckets
+   - Provide admin credentials
+
+   IMPORTANT: Save the admin credentials shown after successful setup!
+
 ### Configuration
 
-1. Set up your Supabase project with the required tables (migrations are provided)
+1. After setup, log in with the admin credentials
 2. Configure your LLM provider in the admin panel
 3. Set up the WLO integration if required
 
-## Development
+### Development
 
-### Project Structure
+The project structure follows a modular organization:
 
 ```
 src/
@@ -86,13 +101,6 @@ src/
 ├── store/         # State management
 └── types/         # TypeScript type definitions
 ```
-
-### Key Components
-
-- `ChatInterface`: Main chat interaction component
-- `DocumentUpload`: Document processing and embedding
-- `LearningProgressTracker`: Student progress monitoring
-- `WLOResourceList`: WLO material integration
 
 ### Building
 
@@ -109,9 +117,9 @@ The application is configured for deployment on Netlify. The `vercel.json` confi
 ### Environment Variables
 
 Required environment variables for production:
-
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
+- `VITE_SETUP_TOKEN` (for initial setup only)
 
 ## Contributing
 

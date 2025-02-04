@@ -29,10 +29,12 @@ export interface ChatbotTemplate {
   access_code?: string;
   created_at: string;
   updated_at: string;
-  subject?: FachKey;
-  education_level?: BildungsstufeKey;
+  subject?: string;
+  education_level?: string;
   author_name?: string;
-  conversation_starters?: string[];
+  author_nickname?: string;
+  conversation_starters: string[];
+  is_active: boolean;
 }
 
 export interface TeacherProfile {

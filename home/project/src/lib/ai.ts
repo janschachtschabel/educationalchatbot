@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { withRetry } from './supabase';
+import { createClient } from '@supabase/supabase-js';
 
 export interface AIConfig {
   provider: string;
@@ -33,7 +33,7 @@ interface ChatResponse {
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
-const MAX_TIMEOUT = 30000; // Increased to 30 seconds for slower connections
+const MAX_TIMEOUT = 10000; // 10 seconds
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -51,16 +51,14 @@ async function fetchWithRetry(
   options: RequestInit,
   retryCount = 0
 ): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), MAX_TIMEOUT);
-
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), MAX_TIMEOUT);
+
     const response = await fetch(url, {
       ...options,
       signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
+    }).finally(() => clearTimeout(timeoutId));
 
     // Handle rate limiting
     if (response.status === 429 && retryCount < MAX_RETRIES) {
@@ -70,14 +68,6 @@ async function fetchWithRetry(
       return fetchWithRetry(url, options, retryCount + 1);
     }
 
-    // Handle other recoverable errors
-    if (!response.ok && retryCount < MAX_RETRIES) {
-      if (response.status >= 500 || response.status === 429) {
-        await sleep(RETRY_DELAY * Math.pow(2, retryCount));
-        return fetchWithRetry(url, options, retryCount + 1);
-      }
-    }
-
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`API error (${response.status}): ${errorText}`);
@@ -85,20 +75,14 @@ async function fetchWithRetry(
 
     return response;
   } catch (error) {
-    clearTimeout(timeoutId);
-
-    if (error instanceof Error) {
-      if (error.name === 'AbortError') {
-        throw new Error('Die Anfrage hat zu lange gedauert. Bitte versuchen Sie es erneut.');
-      }
-
-      // Retry on network errors
-      if (error.name === 'TypeError' && retryCount < MAX_RETRIES) {
-        await sleep(RETRY_DELAY * Math.pow(2, retryCount));
-        return fetchWithRetry(url, options, retryCount + 1);
-      }
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
     }
 
+    if (retryCount < MAX_RETRIES) {
+      await sleep(RETRY_DELAY * Math.pow(2, retryCount));
+      return fetchWithRetry(url, options, retryCount + 1);
+    }
     throw error;
   }
 }
@@ -106,13 +90,11 @@ async function fetchWithRetry(
 export const ai = {
   async getChatbotConfig(): Promise<AIConfig> {
     try {
-      // Try to get admin settings with retry
-      const { data: adminSettings, error: adminError } = await withRetry(async () => 
-        supabase
-          .from('admin_settings')
-          .select('provider, model, api_key, base_url, superprompt')
-          .maybeSingle()
-      );
+      // Try to get admin settings
+      const { data: adminSettings, error: adminError } = await supabase
+        .from('admin_settings')
+        .select('provider, model, api_key, base_url, superprompt')
+        .maybeSingle();
 
       // Handle errors
       if (adminError) {
@@ -157,11 +139,6 @@ export const ai = {
       );
 
       const result: EmbeddingResponse = await response.json();
-      
-      if (!result.data?.[0]?.embedding) {
-        throw new Error('Invalid embedding response');
-      }
-
       return result.data[0].embedding;
     } catch (error) {
       console.error('Error getting embeddings:', error);
@@ -173,18 +150,16 @@ export const ai = {
     try {
       const queryEmbedding = await this.getEmbeddings(query, config);
 
-      const { data: documents, error } = await withRetry(async () =>
-        supabase
-          .rpc('match_documents', {
-            query_embedding: queryEmbedding,
-            match_threshold: 0.7,
-            match_count: 3,
-            p_chatbot_id: chatbotId
-          })
-      );
+      const { data: documents, error } = await supabase
+        .rpc('match_documents', {
+          query_embedding: queryEmbedding,
+          match_threshold: 0.7,
+          match_count: 3,
+          p_chatbot_id: chatbotId
+        });
 
       if (error) throw error;
-      return documents?.map(doc => doc.content) || [];
+      return documents.map(doc => doc.content);
     } catch (error) {
       console.error('Error searching documents:', error);
       return []; // Return empty array instead of failing
@@ -237,12 +212,10 @@ export const ai = {
           messages: contextMessages,
           temperature: 0.7,
           max_tokens: 1000,
-          presence_penalty: 0.6,
-          frequency_penalty: 0.6,
         }),
       });
 
-      const result: ChatResponse = await response.json();
+      const result = await response.json();
       
       if (!result.choices?.[0]?.message?.content) {
         throw new Error('Der Chatbot konnte keine gültige Antwort generieren. Bitte versuchen Sie es erneut.');
@@ -255,15 +228,8 @@ export const ai = {
     } catch (error) {
       console.error('Error in AI chat:', error);
       
-      // Provide user-friendly error messages
+      // Re-throw user-friendly errors
       if (error instanceof Error) {
-        if (error.message.includes('API error (401)')) {
-          throw new Error('Der Chatbot ist derzeit nicht verfügbar. Bitte versuchen Sie es später erneut.');
-        } else if (error.message.includes('API error (429)')) {
-          throw new Error('Der Chatbot ist momentan ausgelastet. Bitte warten Sie einen Moment und versuchen Sie es dann erneut.');
-        } else if (error.message.includes('AbortError')) {
-          throw new Error('Die Anfrage hat zu lange gedauert. Bitte versuchen Sie es erneut.');
-        }
         throw error;
       }
       

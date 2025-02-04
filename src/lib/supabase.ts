@@ -3,18 +3,10 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Debug logging
-console.log('Supabase URL:', supabaseUrl);
-console.log('Supabase Key exists:', !!supabaseAnonKey);
-
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Missing Supabase environment variables');
   throw new Error('Missing Supabase environment variables');
 }
-
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000;
-const MAX_TIMEOUT = 10000; // 10 seconds timeout
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -22,116 +14,184 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     detectSessionInUrl: true,
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-    flowType: 'pkce',
-    debug: true, // Enable auth debugging
-    onAuthStateChange: (event, session) => {
-      console.log('Auth state changed:', event, session?.user?.id);
-      if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) {
-        // Clear session data silently
-        if (typeof window !== 'undefined') {
-          window.localStorage.removeItem('supabase-auth');
-          window.localStorage.removeItem('auth-storage');
-        }
-      }
+    flowType: 'pkce'
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 2
     }
   },
   global: {
     headers: {
       'x-client-info': 'edubot-web'
-    },
-    fetch: async (url: string, options: RequestInit) => {
-      console.log('Supabase request:', url);
-      let lastError;
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), MAX_TIMEOUT);
-
-          const response = await window.fetch(url, {
-            ...options,
-            signal: controller.signal
-          }).finally(() => clearTimeout(timeoutId));
-
-          // Log response status
-          console.log('Supabase response:', url, response.status);
-
-          // Handle auth-specific errors
-          if (url.includes('/auth/v1/token')) {
-            const data = await response.clone().json();
-            if (!response.ok) {
-              console.error('Auth error:', data);
-              // Handle specific token errors silently
-              if (response.status === 400 && data.code === 'refresh_token_not_found') {
-                if (typeof window !== 'undefined') {
-                  window.localStorage.removeItem('supabase-auth');
-                  window.localStorage.removeItem('auth-storage');
-                }
-                return response;
-              }
-              // Handle session expiry silently
-              if (response.status === 401) {
-                if (typeof window !== 'undefined') {
-                  window.localStorage.removeItem('supabase-auth');
-                  window.localStorage.removeItem('auth-storage');
-                }
-                return response;
-              }
-              throw new Error(data.error_description || 'Authentication error');
-            }
-          }
-
-          // Handle rate limiting
-          if (response.status === 429) {
-            const retryAfter = response.headers.get('retry-after');
-            if (retryAfter) {
-              console.log('Rate limited, waiting:', retryAfter);
-              await new Promise(resolve => 
-                setTimeout(resolve, parseInt(retryAfter) * 1000)
-              );
-              continue;
-            }
-          }
-
-          return response;
-        } catch (error) {
-          lastError = error;
-          console.error('Supabase request error:', error);
-          const message = error?.message?.toLowerCase() || '';
-          const isRetryable = 
-            message.includes('fetch') || 
-            message.includes('network') ||
-            message.includes('connection') ||
-            message.includes('timeout') ||
-            error.name === 'AbortError';
-
-          if (attempt < MAX_RETRIES - 1 && isRetryable) {
-            console.log(`Retrying request (${attempt + 1}/${MAX_RETRIES})...`);
-            await new Promise(resolve => 
-              setTimeout(resolve, RETRY_DELAY * Math.pow(2, attempt))
-            );
-            continue;
-          }
-          throw error;
-        }
-      }
-      throw lastError;
     }
+  },
+  db: {
+    schema: 'public'
   }
 });
+
+// Retry configuration
+const RETRY_COUNT = 5; // Increased from 3 to 5
+const INITIAL_RETRY_DELAY = 1000;
+const MAX_RETRY_DELAY = 10000;
+
+// Helper function to delay execution with exponential backoff
+const delay = (attempt: number) => {
+  const ms = Math.min(
+    INITIAL_RETRY_DELAY * Math.pow(2, attempt),
+    MAX_RETRY_DELAY
+  );
+  return new Promise(resolve => setTimeout(resolve, ms));
+};
+
+// Wrapper function for database operations with retry logic
+export async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: any;
+  let sessionRefreshed = false;
+  
+  for (let attempt = 0; attempt < RETRY_COUNT; attempt++) {
+    try {
+      // Try to refresh session if not first attempt and not already refreshed
+      if (attempt > 0 && !sessionRefreshed) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await supabase.auth.refreshSession();
+          sessionRefreshed = true;
+        }
+      }
+
+      // Check connection before operation
+      if (attempt > 0) {
+        const { error: pingError } = await supabase
+          .from('profiles')
+          .select('id')
+          .limit(1)
+          .maybeSingle();
+
+        if (pingError) {
+          throw pingError;
+        }
+      }
+
+      // Perform the operation
+      const result = await operation();
+      
+      // Check if the operation returned a Supabase error
+      if (result && typeof result === 'object' && 'error' in result) {
+        const error = (result as any).error;
+        if (error) {
+          // Only retry on connection errors or rate limits
+          if (
+            error.code === 'PGRST301' || // Connection error
+            error.code === '23505' || // Unique violation (retry in case of race condition)
+            error.code === '40001' || // Serialization failure
+            error.code === '429' || // Rate limit
+            error.message?.toLowerCase().includes('connection') ||
+            error.message?.toLowerCase().includes('timeout') ||
+            error.message?.toLowerCase().includes('network')
+          ) {
+            throw error;
+          } else {
+            // Don't retry on other errors
+            return result;
+          }
+        }
+      }
+      
+      return result;
+    } catch (error) {
+      lastError = error;
+      console.warn(`Operation failed (attempt ${attempt + 1}/${RETRY_COUNT}):`, error);
+      
+      // Don't wait on the last attempt
+      if (attempt < RETRY_COUNT - 1) {
+        await delay(attempt);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+// Connection health check with improved error handling
+let healthCheckInterval: NodeJS.Timeout;
+let consecutiveFailures = 0;
+const MAX_CONSECUTIVE_FAILURES = 3;
+
+const startHealthCheck = () => {
+  if (healthCheckInterval) {
+    clearInterval(healthCheckInterval);
+  }
+
+  healthCheckInterval = setInterval(async () => {
+    try {
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('profiles')
+          .select('id')
+          .limit(1);
+
+        if (error) throw error;
+        
+        // Reset failure count on success
+        consecutiveFailures = 0;
+        return { error: null };
+      });
+    } catch (err) {
+      console.error('Health check failed:', err);
+      consecutiveFailures++;
+
+      // If too many consecutive failures, try to recover
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        console.warn('Multiple health checks failed, attempting recovery...');
+        
+        try {
+          // Try to refresh auth session
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            await supabase.auth.refreshSession();
+          }
+
+          // Reset Supabase client connection
+          await supabase.rest.reset();
+          
+          // Reset failure count
+          consecutiveFailures = 0;
+        } catch (recoveryError) {
+          console.error('Recovery attempt failed:', recoveryError);
+        }
+      }
+    }
+  }, 15000); // Check every 15 seconds
+};
+
+// Start health check when the client is created
+if (typeof window !== 'undefined') {
+  startHealthCheck();
+  
+  // Clean up on page unload
+  window.addEventListener('beforeunload', () => {
+    if (healthCheckInterval) {
+      clearInterval(healthCheckInterval);
+    }
+  });
+}
 
 // Check session validity on page load
 const checkSession = async () => {
   if (typeof window === 'undefined') return;
 
   try {
-    console.log('Checking session...');
     const { data: { session }, error } = await supabase.auth.getSession();
-    console.log('Session check result:', session?.user?.id, error);
     
     if (error || !session) {
       // Clear invalid session data silently
       window.localStorage.removeItem('supabase-auth');
       window.localStorage.removeItem('auth-storage');
+    } else {
+      // Refresh the session if it exists
+      await supabase.auth.refreshSession();
     }
   } catch (error) {
     console.error('Session check failed:', error);

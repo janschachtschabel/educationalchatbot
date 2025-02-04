@@ -161,7 +161,9 @@ const translations = {
       tryAdjustingFilters: 'Versuchen Sie die Filter anzupassen oder suchen Sie nach etwas anderem',
       startChat: 'Chat starten',
       author: 'Autor',
-      allAuthors: 'Alle Autoren'
+      allAuthors: 'Alle Autoren',
+      passwordRequired: 'Dieser Chatbot erfordert ein Passwort.',
+      accessDenied: 'Zugriff verweigert. Dieser Chatbot ist nicht öffentlich verfügbar.'
     },
   },
   en: {
@@ -324,7 +326,9 @@ const translations = {
       tryAdjustingFilters: 'Try adjusting the filters or searching for something else',
       startChat: 'Start Chat',
       author: 'Author',
-      allAuthors: 'All Authors'
+      allAuthors: 'All Authors',
+      passwordRequired: 'This chatbot requires a password.',
+      accessDenied: 'Access denied. This chatbot is not publicly available.'
     },
   },
 } as const;

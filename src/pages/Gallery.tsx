@@ -97,45 +97,53 @@ export default function Gallery() {
         throw new Error(t.gallery.inactiveChatbot);
       }
 
-      // If chatbot is not public, check password
-      if (!chatbot.is_public) {
-        // First check if password is required
-        const { data: pwRequired, error: pwCheckError } = await supabase
+      // If chatbot is public, allow access
+      if (chatbot.is_public) {
+        navigate(`/chat/${directId}`);
+        return;
+      }
+
+      // Check if password is required
+      const { data: pwRequired, error: pwCheckError } = await supabase
+        .from('chatbot_passwords')
+        .select('id')
+        .eq('chatbot_id', directId)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (pwCheckError) {
+        console.error('Password check error:', pwCheckError);
+        throw new Error(t.common.error);
+      }
+
+      // If password is required but not provided
+      if (pwRequired && !directPassword) {
+        throw new Error(t.gallery.passwordRequired);
+      }
+
+      // If password is provided, verify it
+      if (directPassword) {
+        const { data: pwValid, error: pwValidError } = await supabase
           .from('chatbot_passwords')
           .select('id')
           .eq('chatbot_id', directId)
+          .eq('password_hash', directPassword)
           .eq('is_active', true)
           .maybeSingle();
 
-        if (pwCheckError) {
-          console.error('Password check error:', pwCheckError);
+        if (pwValidError) {
+          console.error('Password validation error:', pwValidError);
           throw new Error(t.common.error);
         }
 
-        // If password is required but not provided
-        if (pwRequired && !directPassword) {
-          throw new Error(t.gallery.passwordRequired);
+        if (!pwValid) {
+          throw new Error(t.gallery.invalidPassword);
         }
+      }
 
-        // If password is provided, verify it
-        if (directPassword) {
-          const { data: pwValid, error: pwValidError } = await supabase
-            .from('chatbot_passwords')
-            .select('id')
-            .eq('chatbot_id', directId)
-            .eq('password_hash', directPassword)
-            .eq('is_active', true)
-            .maybeSingle();
-
-          if (pwValidError) {
-            console.error('Password validation error:', pwValidError);
-            throw new Error(t.common.error);
-          }
-
-          if (!pwValid) {
-            throw new Error(t.gallery.invalidPassword);
-          }
-        }
+      // If no password is required and chatbot is not public
+      if (!pwRequired && !chatbot.is_public) {
+        throw new Error(t.gallery.accessDenied);
       }
 
       // All checks passed, navigate to chat
