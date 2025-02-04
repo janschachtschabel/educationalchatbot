@@ -33,11 +33,10 @@ interface ChatResponse {
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
-const MAX_TIMEOUT = 30000; // Increased to 30 seconds for slower connections
+const MAX_TIMEOUT = 30000;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Default config as fallback
 const DEFAULT_CONFIG: AIConfig = {
   provider: 'openai',
   model: 'gpt-4o-mini',
@@ -62,7 +61,6 @@ async function fetchWithRetry(
 
     clearTimeout(timeoutId);
 
-    // Handle rate limiting
     if (response.status === 429 && retryCount < MAX_RETRIES) {
       const retryAfter = response.headers.get('retry-after');
       const delay = retryAfter ? parseInt(retryAfter) * 1000 : RETRY_DELAY * Math.pow(2, retryCount);
@@ -70,7 +68,6 @@ async function fetchWithRetry(
       return fetchWithRetry(url, options, retryCount + 1);
     }
 
-    // Handle other recoverable errors
     if (!response.ok && retryCount < MAX_RETRIES) {
       if (response.status >= 500 || response.status === 429) {
         await sleep(RETRY_DELAY * Math.pow(2, retryCount));
@@ -92,7 +89,6 @@ async function fetchWithRetry(
         throw new Error('Die Anfrage hat zu lange gedauert. Bitte versuchen Sie es später erneut.');
       }
 
-      // Retry on network errors
       if (error.name === 'TypeError' && retryCount < MAX_RETRIES) {
         await sleep(RETRY_DELAY * Math.pow(2, retryCount));
         return fetchWithRetry(url, options, retryCount + 1);
@@ -106,7 +102,6 @@ async function fetchWithRetry(
 export const ai = {
   async getChatbotConfig(): Promise<AIConfig> {
     try {
-      // Try to get admin settings with retry
       const { data: adminSettings, error: adminError } = await withConnectionCheck(async () => 
         supabase
           .from('admin_settings')
@@ -114,18 +109,15 @@ export const ai = {
           .maybeSingle()
       );
 
-      // Handle errors
       if (adminError) {
         console.error('Error fetching admin settings:', adminError);
         return DEFAULT_CONFIG;
       }
 
-      // If no settings exist, return default config
       if (!adminSettings) {
         return DEFAULT_CONFIG;
       }
 
-      // Return admin settings
       return {
         provider: adminSettings.provider || DEFAULT_CONFIG.provider,
         model: adminSettings.model || DEFAULT_CONFIG.model,
@@ -171,23 +163,78 @@ export const ai = {
 
   async searchSimilarDocuments(chatbotId: string, query: string, config: AIConfig): Promise<string[]> {
     try {
+      // First check if document_qa is enabled and get chatbot settings
+      const { data: chatbot, error: chatbotError } = await supabase
+        .from('chatbot_templates')
+        .select('enabled_tools')
+        .eq('id', chatbotId)
+        .single();
+
+      if (chatbotError) {
+        console.error('Error checking document_qa status:', chatbotError);
+        return [];
+      }
+
+      // If document_qa is not enabled, return empty array
+      if (!chatbot?.enabled_tools?.includes('document_qa')) {
+        console.log('document_qa is not enabled for this chatbot');
+        return [];
+      }
+
+      // Check if there are any document embeddings
+      const { count, error: countError } = await supabase
+        .from('document_embeddings')
+        .select('*', { count: 'exact', head: true })
+        .eq('chatbot_id', chatbotId)
+        .neq('content', 'Processing...')
+        .not('embedding', 'is', null);
+
+      if (countError) {
+        console.error('Error checking document embeddings:', countError);
+        return [];
+      }
+
+      if (!count || count === 0) {
+        console.log('No valid document embeddings found');
+        return [];
+      }
+
+      // Generate query embedding
+      console.log('Generating embedding for query:', query);
       const queryEmbedding = await this.getEmbeddings(query, config);
 
+      // Search for similar documents with lower threshold
+      console.log('Searching for similar documents...');
       const { data: documents, error } = await withConnectionCheck(async () =>
         supabase
           .rpc('match_documents', {
             query_embedding: queryEmbedding,
-            match_threshold: 0.7,
-            match_count: 3,
+            match_threshold: 0.1, // Reduced from 0.5 to 0.2
+            match_count: 40,
             p_chatbot_id: chatbotId
           })
       );
 
-      if (error) throw error;
-      return documents?.map(doc => doc.content) || [];
+      if (error) {
+        console.error('Error searching documents:', error);
+        throw error;
+      }
+
+      // Log matches for debugging
+      console.log('Found document matches:', documents);
+
+      if (!documents || documents.length === 0) {
+        console.log('No matching documents found');
+        return [];
+      }
+
+      // Return document contents sorted by similarity
+      return documents
+        .sort((a, b) => b.similarity - a.similarity)
+        .map(doc => doc.content);
     } catch (error) {
       console.error('Error searching documents:', error);
-      return []; // Return empty array instead of failing
+      return [];
     }
   },
 
@@ -200,9 +247,10 @@ export const ai = {
       let contextMessages = [...messages];
       const lastMessage = messages[messages.length - 1];
 
-      // Add document context if available
+      // Add document context if available and document_qa is enabled
       if (chatbotId && lastMessage.role === 'user') {
         try {
+          console.log('Searching for relevant documents for:', lastMessage.content);
           const relevantDocs = await this.searchSimilarDocuments(
             chatbotId,
             lastMessage.content,
@@ -210,21 +258,28 @@ export const ai = {
           );
 
           if (relevantDocs.length > 0) {
+            console.log(`Found ${relevantDocs.length} relevant documents`);
+            
+            // Insert document context before the user's message
             contextMessages.splice(messages.length - 1, 0, {
               role: 'system',
-              content: `Here is relevant context from the knowledge base:\n\n${relevantDocs.join('\n\n')}`
+              content: `Hier sind relevante Informationen aus der Wissensbasis:\n\n${relevantDocs.join('\n\n')}\n\nBitte beantworte die folgende Frage basierend auf diesen Informationen. Beziehe dich dabei explizit auf die Informationen aus den Dokumenten und zitiere relevante Passagen.`
             });
+
+            console.log('Added document context to conversation');
+          } else {
+            console.log('No relevant documents found');
           }
         } catch (error) {
           console.error('Error fetching document context:', error);
-          // Continue without document context rather than failing
         }
       }
 
-      // Add superprompt if available
       if (config.superprompt && contextMessages[0]?.role === 'system') {
         contextMessages[0].content = `${config.superprompt}\n\n${contextMessages[0].content}`;
       }
+
+      console.log('Sending chat completion request with context:', contextMessages);
 
       const response = await fetchWithRetry(`${config.baseUrl}/chat/completions`, {
         method: 'POST',
@@ -255,7 +310,6 @@ export const ai = {
     } catch (error) {
       console.error('Error in AI chat:', error);
       
-      // Provide user-friendly error messages
       if (error instanceof Error) {
         if (error.message.includes('API error (401)')) {
           throw new Error('Der Chatbot ist derzeit nicht verfügbar. Bitte versuchen Sie es später erneut.');

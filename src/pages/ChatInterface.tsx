@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, ArrowLeft, MessageSquare, AlertCircle } from 'lucide-react';
+import { Send, Paperclip, Bot, User, ArrowLeft, MessageSquare, AlertCircle } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { supabase } from '../lib/supabase';
@@ -9,6 +9,7 @@ import { useLanguageStore } from '../lib/useTranslations';
 import WLOResourceList from '../components/WLOResourceList';
 import LearningProgressTracker from '../components/LearningProgressTracker';
 import { learningProgress } from '../lib/learningProgress';
+import DocumentUploadArea from '../components/DocumentUploadArea';
 
 interface Message {
   id: string;
@@ -44,15 +45,14 @@ export default function ChatInterface() {
   const [showStarters, setShowStarters] = useState(true);
   const [systemPrompt, setSystemPrompt] = useState<string>('');
   const [sessionId] = useState(() => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+  const [showUpload, setShowUpload] = useState(false);
 
-  // Store messages in sessionStorage for anonymous users
   useEffect(() => {
     if (!user && messages.length > 0) {
       sessionStorage.setItem(`chat-${id}`, JSON.stringify(messages));
     }
   }, [messages, id, user]);
 
-  // Load messages from sessionStorage for anonymous users
   useEffect(() => {
     if (!user && id) {
       const savedMessages = sessionStorage.getItem(`chat-${id}`);
@@ -62,7 +62,6 @@ export default function ChatInterface() {
     }
   }, [id, user]);
 
-  // Clean up sessionStorage when component unmounts
   useEffect(() => {
     return () => {
       if (!user && id) {
@@ -102,7 +101,6 @@ export default function ChatInterface() {
 
   async function loadChatbot() {
     try {
-      // First try to get the chatbot
       const { data: chatbot, error: chatbotError } = await supabase
         .from('chatbot_templates')
         .select('*')
@@ -121,7 +119,6 @@ export default function ChatInterface() {
         throw new Error('Dieser Chatbot ist nicht verfügbar.');
       }
 
-      // Check if user has access
       const hasAccess = await checkChatbotAccess(chatbot);
       if (!hasAccess) {
         navigate(`/gallery?chatbot=${id}`);
@@ -130,7 +127,6 @@ export default function ChatInterface() {
 
       setChatbot(chatbot);
 
-      // Add initial greeting
       setMessages([{
         id: '0',
         role: 'assistant',
@@ -147,14 +143,10 @@ export default function ChatInterface() {
   }
 
   async function checkChatbotAccess(chatbot: ChatbotTemplate): Promise<boolean> {
-    // Allow access if:
-    // 1. Chatbot is public
-    // 2. User is the creator
     if (chatbot.is_public || user?.id === chatbot.creator_id) {
       return true;
     }
 
-    // For non-public chatbots, check password protection
     const { data: passwordData, error: passwordError } = await supabase
       .from('chatbot_passwords')
       .select('id')
@@ -167,8 +159,6 @@ export default function ChatInterface() {
       return false;
     }
 
-    // If no password is set, allow access
-    // If password is set, access will be handled by the Gallery component
     return !passwordData;
   }
 
@@ -185,7 +175,6 @@ export default function ChatInterface() {
       setWloResources(data || []);
     } catch (err) {
       console.error('Error loading WLO resources:', err);
-      // Non-critical - continue without WLO resources
     }
   }
 
@@ -194,7 +183,6 @@ export default function ChatInterface() {
     
     let prompt = chatbot.system_prompt;
 
-    // Add WLO materials information if enabled and available
     if (chatbot.enabled_tools?.includes('wlo_resources') && wloResources.length > 0) {
       prompt = `${prompt}\n\nDu hast Zugriff auf folgende Lehr- und Lernmaterialien von WirLernenOnline, die du aktiv in den Lehr- und Lernprozess einbinden sollst:\n\n`;
       
@@ -217,7 +205,6 @@ export default function ChatInterface() {
     if (!chatbot?.enabled_tools?.includes('learning_progress')) return;
     
     try {
-      // Create a more structured prompt for better evaluation
       const evalMessages: AIMessage[] = [
         { 
           role: 'system', 
@@ -256,23 +243,18 @@ Do not include any additional text or explanation.`
       const { response } = await ai.chat(evalMessages, config);
       
       try {
-        // Validate response format
         const evaluation = JSON.parse(response);
         
-        // Ensure the evaluation has the correct structure
         if (typeof evaluation !== 'object' || evaluation === null) {
           throw new Error('Invalid evaluation format');
         }
 
-        // Validate and process each objective
         Object.entries(evaluation).forEach(([objectiveId, score]) => {
-          // Ensure score is a number between 0 and 5
           const numScore = Number(score);
           if (isNaN(numScore) || numScore < 0 || numScore > 5) {
             throw new Error(`Invalid score for objective ${objectiveId}`);
           }
 
-          // Update learning progress with validated score
           learningProgress.updateObjective(sessionId, objectiveId, {
             confidence: numScore,
             status: numScore >= 4 ? 'completed' : numScore > 0 ? 'in_progress' : 'not_started'
@@ -280,12 +262,10 @@ Do not include any additional text or explanation.`
         });
       } catch (parseError) {
         console.error('Error parsing evaluation:', parseError);
-        // Don't fail silently - throw error to trigger retry
         throw parseError;
       }
     } catch (error) {
       console.error('Error evaluating learning progress:', error);
-      // Don't throw - this is a non-critical feature
     }
   };
 
@@ -328,20 +308,18 @@ Do not include any additional text or explanation.`
 
       setMessages(prev => [...prev, assistantMessage]);
 
-      // Track token usage without user data
       try {
         await supabase
           .from('usage_logs')
           .insert({
             chatbot_id: id,
             tokens_used: tokens,
-            user_id: user?.id // Optional - only set if user is logged in
+            user_id: user?.id
           });
       } catch (usageError) {
         console.error('Error logging usage:', usageError);
       }
 
-      // Evaluate learning progress if enabled
       if (chatbot.enabled_tools?.includes('learning_progress')) {
         await evaluateLearningProgress(
           messages.concat(userMessage, assistantMessage),
@@ -349,7 +327,6 @@ Do not include any additional text or explanation.`
         );
       }
 
-      // Save chat history for logged-in users only
       if (user) {
         await saveChatHistory(userMessage, assistantMessage, tokens);
       }
@@ -374,7 +351,7 @@ Do not include any additional text or explanation.`
   };
 
   const saveChatHistory = async (userMessage: Message, assistantMessage: Message, tokens: number) => {
-    if (!user || !id) return; // Only save history for logged-in users
+    if (!user || !id) return;
     
     try {
       const { error: historyError } = await supabase
@@ -390,7 +367,6 @@ Do not include any additional text or explanation.`
       if (historyError) throw historyError;
     } catch (error) {
       console.error('Error saving chat history:', error);
-      // Don't throw - this is a non-critical operation
     }
   };
 
@@ -422,7 +398,6 @@ Do not include any additional text or explanation.`
   return (
     <div className="max-w-7xl mx-auto px-4">
       <div className="flex gap-4">
-        {/* Left Sidebar - Learning Progress */}
         {chatbot?.enabled_tools?.includes('learning_progress') && (
           <div className="w-64 shrink-0">
             <div className="sticky top-4">
@@ -431,7 +406,6 @@ Do not include any additional text or explanation.`
           </div>
         )}
 
-        {/* Main Chat Area */}
         <div className={`flex-1 ${
           !chatbot?.enabled_tools?.includes('learning_progress') && 
           !chatbot?.enabled_tools?.includes('wlo_resources') 
@@ -439,7 +413,6 @@ Do not include any additional text or explanation.`
             : ''
         }`}>
           <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            {/* Header */}
             <div className="border-b border-gray-200 p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
@@ -456,7 +429,6 @@ Do not include any additional text or explanation.`
             </div>
 
             <div className="h-[600px] flex flex-col">
-              {/* Messages Area */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {messages.map((msg) => (
                   <div
@@ -493,7 +465,15 @@ Do not include any additional text or explanation.`
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Conversation Starters */}
+              {showUpload && chatbot?.enabled_tools?.includes('document_qa') && (
+                <div className="border-t border-gray-200 p-4">
+                  <DocumentUploadArea
+                    chatbotId={id!}
+                    onUploadComplete={() => setShowUpload(false)}
+                  />
+                </div>
+              )}
+
               {showStarters && chatbot?.conversation_starters?.length > 0 && (
                 <div className="border-t border-gray-200 p-4 bg-gray-50">
                   <h4 className="text-sm font-medium text-gray-700 mb-2">
@@ -515,12 +495,23 @@ Do not include any additional text or explanation.`
                 </div>
               )}
 
-              {/* Input Form */}
               <form onSubmit={(e) => {
                 e.preventDefault();
                 if (message.trim()) handleUserMessage(message);
               }} className="border-t border-gray-200 p-4">
                 <div className="flex gap-4">
+                  {chatbot?.enabled_tools?.includes('document_qa') && (
+                    <button
+                      type="button"
+                      onClick={() => setShowUpload(!showUpload)}
+                      className={`p-2 rounded-full transition ${
+                        showUpload ? 'bg-indigo-100 text-indigo-600' : 'hover:bg-gray-100 text-gray-500'
+                      }`}
+                      title={t.chat.uploadFile}
+                    >
+                      <Paperclip className="h-5 w-5" />
+                    </button>
+                  )}
                   <div className="flex-1 flex gap-4">
                     <input
                       type="text"
@@ -545,7 +536,6 @@ Do not include any additional text or explanation.`
           </div>
         </div>
 
-        {/* Right Sidebar - WLO Resources */}
         {chatbot?.enabled_tools?.includes('wlo_resources') && wloResources.length > 0 && (
           <div className="w-64 shrink-0">
             <div className="sticky top-4">

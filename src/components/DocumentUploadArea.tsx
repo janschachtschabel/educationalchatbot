@@ -2,12 +2,13 @@ import React, { useState, useRef } from 'react';
 import { FileText, Upload, X, AlertCircle, Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLanguageStore } from '../lib/useTranslations';
-import { extractTextFromPDF, splitTextIntoChunks } from '../lib/pdfUtils';
-import { useAuthStore } from '../store/authStore';
+import { extractTextFromPDF } from '../lib/pdfUtils';
+import { ai } from '../lib/ai';
 
 interface DocumentUploadAreaProps {
   chatbotId: string;
   onUploadComplete: () => void;
+  showPlaceholder?: boolean;
 }
 
 interface ProcessingFile {
@@ -17,16 +18,13 @@ interface ProcessingFile {
   error?: string;
 }
 
-export default function DocumentUploadArea({ chatbotId, onUploadComplete }: DocumentUploadAreaProps) {
+export default function DocumentUploadArea({ chatbotId, onUploadComplete, showPlaceholder = false }: DocumentUploadAreaProps) {
   const { t } = useLanguageStore();
-  const { user } = useAuthStore();
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [processingFiles, setProcessingFiles] = useState<{
     [key: string]: ProcessingFile;
   }>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allowedTypes = [
     'application/pdf',
@@ -39,157 +37,196 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
       ...prev,
       [fileId]: {
         ...prev[fileId],
-        progress
+        progress,
+        status: 'processing'
       }
     }));
   };
 
   const handleFileUpload = async (files: FileList) => {
-    if (!user) return;
+    if (!chatbotId) return;
 
-    setError('');
-    setUploading(true);
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const fileId = `${Date.now()}-${i}`;
 
-    try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const fileId = `${Date.now()}-${i}`;
+      // Add file to processing state
+      setProcessingFiles(prev => ({
+        ...prev,
+        [fileId]: {
+          name: file.name,
+          status: 'uploading'
+        }
+      }));
 
-        // Add file to processing state
+      // Validate file type
+      if (!allowedTypes.includes(file.type)) {
         setProcessingFiles(prev => ({
           ...prev,
           [fileId]: {
             name: file.name,
-            status: 'uploading'
+            status: 'error',
+            error: t.dashboard.invalidFileType
+          }
+        }));
+        continue;
+      }
+
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setProcessingFiles(prev => ({
+          ...prev,
+          [fileId]: {
+            name: file.name,
+            status: 'error',
+            error: t.dashboard.fileTooLarge
+          }
+        }));
+        continue;
+      }
+
+      try {
+        // Extract text content first
+        let content = '';
+        if (file.type === 'application/pdf') {
+          setProcessingFiles(prev => ({
+            ...prev,
+            [fileId]: {
+              ...prev[fileId],
+              status: 'processing',
+              progress: 0
+            }
+          }));
+
+          content = await extractTextFromPDF(file, (progress) => {
+            updateFileProgress(fileId, progress * 0.5); // First 50% for text extraction
+          });
+        } else if (file.type === 'text/plain') {
+          content = await file.text();
+        } else {
+          throw new Error('Unsupported file type');
+        }
+
+        if (!content) {
+          throw new Error('Could not extract text from file');
+        }
+
+        // Upload file to storage
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${chatbotId}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(fileName, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('documents')
+          .getPublicUrl(fileName);
+
+        // Update progress to show embedding generation
+        setProcessingFiles(prev => ({
+          ...prev,
+          [fileId]: {
+            ...prev[fileId],
+            status: 'processing',
+            progress: 50 // Start second half - embedding generation
           }
         }));
 
-        // Validate file type
-        if (!allowedTypes.includes(file.type)) {
-          setProcessingFiles(prev => ({
-            ...prev,
-            [fileId]: {
-              name: file.name,
-              status: 'error',
-              error: t.dashboard.invalidFileType
+        // First create the document record
+        const { data: docData, error: docError } = await supabase
+          .from('chatbot_documents')
+          .insert([{
+            chatbot_id: chatbotId,
+            filename: file.name,
+            file_type: file.type,
+            file_url: publicUrl,
+            content: content,
+            metadata: {
+              original_size: file.size,
+              processing_date: new Date().toISOString()
             }
-          }));
-          continue;
-        }
+          }])
+          .select()
+          .single();
 
-        // Validate file size (max 10MB)
-        if (file.size > 10 * 1024 * 1024) {
-          setProcessingFiles(prev => ({
-            ...prev,
-            [fileId]: {
-              name: file.name,
-              status: 'error',
-              error: t.dashboard.fileTooLarge
-            }
-          }));
-          continue;
-        }
+        if (docError) throw docError;
+        if (!docData) throw new Error('No document data returned');
 
-        try {
-          // Extract text from file
-          let text = '';
-          if (file.type === 'application/pdf') {
-            setProcessingFiles(prev => ({
-              ...prev,
-              [fileId]: {
-                ...prev[fileId],
-                status: 'processing',
-                progress: 0
-              }
-            }));
+        // Get AI config for embeddings
+        const config = await ai.getChatbotConfig();
 
-            text = await extractTextFromPDF(file, (progress) => {
-              updateFileProgress(fileId, progress);
-            });
-          } else if (file.type === 'text/plain') {
-            text = await file.text();
-          } else {
-            throw new Error('Unsupported file type');
-          }
+        // Split content into chunks and generate embeddings
+        const chunks = content.match(/[^.!?]+[.!?]+/g) || [content];
+        const totalChunks = chunks.length;
 
-          // Split text into chunks
-          const chunks = splitTextIntoChunks(text);
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i].trim();
+          if (!chunk) continue;
 
-          // Upload file to storage
-          const fileExt = file.name.split('.').pop();
-          const fileName = `${chatbotId}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+          // Generate embedding for chunk
+          const embedding = await ai.getEmbeddings(chunk, config);
 
-          const { error: uploadError } = await supabase.storage
-            .from('documents')
-            .upload(fileName, file);
-
-          if (uploadError) throw uploadError;
-
-          const { data: { publicUrl } } = supabase.storage
-            .from('documents')
-            .getPublicUrl(fileName);
-
-          // Create document record with content and metadata
-          const { data: docData, error: docError } = await supabase
-            .from('chatbot_documents')
+          // Insert chunk with embedding
+          const { error: embeddingError } = await supabase
+            .from('document_embeddings')
             .insert([{
               chatbot_id: chatbotId,
-              filename: file.name,
-              file_type: file.type,
-              file_url: publicUrl,
-              content: text,
-              metadata: {
-                original_size: file.size,
-                chunk_count: chunks.length,
-                processing_date: new Date().toISOString()
-              }
-            }])
-            .select()
-            .single();
+              document_id: docData.id, // Use the document ID from the created record
+              content: chunk,
+              embedding: embedding
+            }]);
 
-          if (docError) throw docError;
+          if (embeddingError) throw embeddingError;
 
-          // Process document chunks for embeddings
-          if (docData) {
-            for (let i = 0; i < chunks.length; i++) {
-              await supabase
-                .from('document_embeddings')
-                .insert([{
-                  chatbot_id: chatbotId,
-                  document_id: docData.id,
-                  content: chunks[i]
-                }]);
-            }
-          }
-
-          // Update status to completed
+          // Update progress (50-100%)
+          const progress = 50 + ((i + 1) / totalChunks * 50);
           setProcessingFiles(prev => ({
             ...prev,
             [fileId]: {
-              name: file.name,
-              status: 'completed'
-            }
-          }));
-        } catch (err) {
-          console.error('Error processing file:', file.name, err);
-          setProcessingFiles(prev => ({
-            ...prev,
-            [fileId]: {
-              name: file.name,
-              status: 'error',
-              error: err instanceof Error ? err.message : t.common.error
+              ...prev[fileId],
+              progress
             }
           }));
         }
-      }
 
-      onUploadComplete();
-    } catch (err) {
-      console.error('Error uploading documents:', err);
-      setError(t.common.error);
-    } finally {
-      setUploading(false);
+        // Update metadata with chunk count
+        const { error: updateError } = await supabase
+          .from('chatbot_documents')
+          .update({
+            metadata: {
+              ...docData.metadata,
+              chunk_count: chunks.length
+            }
+          })
+          .eq('id', docData.id);
+
+        if (updateError) throw updateError;
+
+        // Update status to completed
+        setProcessingFiles(prev => ({
+          ...prev,
+          [fileId]: {
+            name: file.name,
+            status: 'completed'
+          }
+        }));
+      } catch (err) {
+        console.error('Error processing file:', file.name, err);
+        setProcessingFiles(prev => ({
+          ...prev,
+          [fileId]: {
+            name: file.name,
+            status: 'error',
+            error: err instanceof Error ? err.message : t.common.error
+          }
+        }));
+      }
     }
+
+    onUploadComplete();
   };
 
   const handleDrop = async (e: React.DragEvent) => {
@@ -229,6 +266,14 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
     }
   }, [processingFiles]);
 
+  if (showPlaceholder) {
+    return (
+      <div className="text-center py-8 text-gray-500">
+        {t.dashboard.noDocuments}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div
@@ -258,14 +303,7 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
         <div className="flex flex-col items-center">
           <Upload className="h-12 w-12 text-gray-400 mb-4" />
           <p className="text-gray-600 mb-2">
-            {uploading ? (
-              <span className="flex items-center gap-2">
-                <Upload className="h-5 w-5 animate-bounce" />
-                {t.common.uploading}
-              </span>
-            ) : (
-              t.dashboard.dropFilesHere
-            )}
+            {t.dashboard.dropFilesHere}
           </p>
           <p className="text-sm text-gray-500 mb-4">
             {t.dashboard.allowedFileTypes}
@@ -278,13 +316,6 @@ export default function DocumentUploadArea({ chatbotId, onUploadComplete }: Docu
           </button>
         </div>
       </div>
-
-      {error && (
-        <div className="flex items-center gap-2 text-red-600 bg-red-50 p-3 rounded-md">
-          <AlertCircle className="h-5 w-5" />
-          <span className="text-sm">{error}</span>
-        </div>
-      )}
 
       {/* Processing Status */}
       {Object.entries(processingFiles).map(([id, file]) => (

@@ -20,6 +20,7 @@ export default function CreateChatbot() {
   const [chatbotId, setChatbotId] = useState<string | null>(null);
   const [documents, setDocuments] = useState<Array<{ id: string; filename: string; created_at: string }>>([]);
   const [wloResources, setWloResources] = useState<any[]>([]);
+  const [showUpload, setShowUpload] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -85,6 +86,7 @@ export default function CreateChatbot() {
       }
 
       setChatbotId(data.id);
+      setShowUpload(true);
       loadDocuments(data.id);
     } catch (err) {
       console.error('Error creating chatbot:', err);
@@ -290,7 +292,7 @@ export default function CreateChatbot() {
           />
         </div>
 
-        {showDocumentUpload && chatbotId && (
+        {showDocumentUpload && (
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
@@ -299,56 +301,57 @@ export default function CreateChatbot() {
                   {t.dashboard.documents}
                 </h2>
               </div>
-              <button
-                type="button"
-                onClick={() => document.getElementById('document-upload')?.click()}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition"
-              >
-                <Upload className="h-5 w-5" />
-                {t.dashboard.uploadDocument}
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {documents.length > 0 ? (
-                <div className="border rounded-lg divide-y">
-                  {documents.map((doc) => (
-                    <div
-                      key={doc.id}
-                      className="flex items-center justify-between p-4 hover:bg-gray-50"
-                    >
-                      <div className="flex items-center gap-3">
-                        <FileText className="h-5 w-5 text-gray-400" />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">
-                            {doc.filename}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {new Date(doc.created_at).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDocument(doc.id)}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        <X className="h-5 w-5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-6 text-gray-500">
-                  {t.dashboard.noDocuments}
-                </div>
+              {chatbotId && (
+                <button
+                  type="button"
+                  onClick={() => setShowUpload(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition"
+                >
+                  <Upload className="h-5 w-5" />
+                  {t.dashboard.uploadDocument}
+                </button>
               )}
             </div>
 
-            <DocumentUploadArea
-              chatbotId={chatbotId}
-              onUploadComplete={() => loadDocuments(chatbotId)}
-            />
+            {chatbotId && showUpload && (
+              <DocumentUploadArea
+                chatbotId={chatbotId}
+                onUploadComplete={() => {
+                  setShowUpload(false);
+                  loadDocuments(chatbotId);
+                }}
+              />
+            )}
+
+            {documents.length > 0 && (
+              <div className="border rounded-lg divide-y">
+                {documents.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="flex items-center justify-between p-4 hover:bg-gray-50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <FileText className="h-5 w-5 text-gray-400" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {doc.filename}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(doc.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDocument(doc.id)}
+                      className="text-red-600 hover:text-red-800"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

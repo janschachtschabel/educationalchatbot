@@ -24,14 +24,22 @@ interface ResourceCardProps {
 // Helper function to fix preview URLs
 const fixPreviewUrl = (url: string) => {
   if (!url) return null;
+  
   // If URL starts with /edu-sharing, prepend the base URL
   if (url.startsWith('/edu-sharing')) {
     return `${WLO_BASE_URL}${url}`;
   }
+  
   // If URL contains /api/edu-sharing, replace with correct base
   if (url.includes('/api/edu-sharing')) {
     return url.replace(/.*\/api\/edu-sharing/, `${WLO_BASE_URL}/edu-sharing`);
   }
+
+  // If URL contains the Vercel domain, replace it with the correct base
+  if (url.includes('.vercel.app/edu-sharing')) {
+    return url.replace(/https?:\/\/[^\/]+\/edu-sharing/, `${WLO_BASE_URL}/edu-sharing`);
+  }
+
   return url;
 };
 
